@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio, threading, json, time, sys
+import re
 import hid, websockets
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -675,6 +676,40 @@ async def handle_discover_bluesound(request):
         return web.json_response([], headers={'Access-Control-Allow-Origin': '*'})
     except Exception as e:
         logger.warning('Bluesound discovery failed: %s', e)
+        return web.json_response([], headers={'Access-Control-Allow-Origin': '*'})
+
+
+async def handle_discover_beoplay(request):
+    """GET /discover/beoplay — find B&O BeoPlay/NetworkLink speakers via mDNS (_beoremote._tcp)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'avahi-browse', '-r', '-t', '-p', '_beoremote._tcp',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        devices = []
+        seen: set = set()
+        for line in stdout.decode(errors='replace').splitlines():
+            parts = line.split(';')
+            # avahi-browse -p resolved record: =;<iface>;<proto>;<name>;<type>;<domain>;<host>;<addr>;<port>;<txt>
+            if len(parts) < 9 or parts[0] != '=' or parts[2] != 'IPv4':
+                continue
+            name, addr = parts[3], parts[7]
+            # avahi -p escapes bytes as \NNN (decimal), e.g. "Beosound\032Stage"
+            name = re.sub(r'\\(\d{3})', lambda m: chr(int(m.group(1))), name)
+            if addr and addr not in seen:
+                seen.add(addr)
+                devices.append({'name': name, 'ip': addr})
+        devices.sort(key=lambda x: x['name'])
+        return web.json_response(devices, headers={'Access-Control-Allow-Origin': '*'})
+    except asyncio.TimeoutError:
+        return web.json_response([], headers={'Access-Control-Allow-Origin': '*'})
+    except FileNotFoundError:
+        logger.debug('avahi-browse not found — BeoPlay discovery unavailable')
+        return web.json_response([], headers={'Access-Control-Allow-Origin': '*'})
+    except Exception as e:
+        logger.warning('BeoPlay discovery failed: %s', e)
         return web.json_response([], headers={'Access-Control-Allow-Origin': '*'})
 
 
@@ -1819,6 +1854,7 @@ async def main():
     app.router.add_get('/qrcode', handle_qrcode)
     app.router.add_get('/discover/sonos', handle_discover_sonos)
     app.router.add_get('/discover/bluesound', handle_discover_bluesound)
+    app.router.add_get('/discover/beoplay', handle_discover_beoplay)
     app.router.add_post('/config', handle_config_save)
     app.router.add_options('/config', handle_config_save)
     runner = web.AppRunner(app, access_log=None)

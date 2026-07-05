@@ -376,6 +376,7 @@ const VOLUME_TYPES = [
     ['beolab5',   'BeoLab 5',       'sonos bluesound local'],
     ['powerlink', 'PowerLink',      'local'],
     ['bluesound', 'Bluesound',      'bluesound'],
+    ['beoplay',   'BeoPlay speaker','beoplay'],
     ['hdmi',      'HDMI',           'local'],
     ['spdif',     'S/PDIF',         'local'],
     ['rca',       'RCA',            'local'],
@@ -388,8 +389,8 @@ const VOLUME_HOST_TYPES = ['beolab5', 'bluesound', 'c4amp'];
 // handles bass/treble/loudness) — hide those tone controls for these.
 // Balance is broader: it's applied pre-output in our PipeWire chain
 // even for beolab5, so only the truly remote outputs exclude it.
-const TONE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beolab5'];
-const BALANCE_EXCLUDED_TYPES = ['sonos', 'bluesound'];
+const TONE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay', 'beolab5'];
+const BALANCE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay'];
 
 const CFG_SOURCE_VIEWS = {
     'PLAYING':'playing','JOIN':'join','SPOTIFY':'spotify','TIDAL':'tidal',
@@ -437,13 +438,14 @@ function renderDevice(cfg) {
 
 function renderPlayer(cfg) {
     const p = cfg.player || {};
-    const showIp = p.type === 'sonos' || p.type === 'bluesound';
+    const showIp = p.type === 'sonos' || p.type === 'bluesound' || p.type === 'beoplay';
     return `<div class="cfg-card">
         <h2>Player</h2>
         <label for="cfg-player-type">Type</label>
         <select id="cfg-player-type">
             <option value="sonos" ${p.type==='sonos'?'selected':''}>Sonos</option>
             <option value="bluesound" ${p.type==='bluesound'?'selected':''}>Bluesound</option>
+            <option value="beoplay" ${p.type==='beoplay'?'selected':''}>B&amp;O BeoPlay</option>
             <option value="local" ${p.type==='local'?'selected':''}>Local (mpv)</option>
         </select>
         <div id="cfg-player-ip-cond" class="cfg-cond${showIp?' show':''}">
@@ -1323,7 +1325,7 @@ function setupListeners() {
         if (link) link.href = (e.target.value.trim().replace(/\/$/, '') || '') + '/profile';
     });
     document.getElementById('cfg-player-type')?.addEventListener('change', e => {
-        const show = ['sonos','bluesound'].includes(e.target.value);
+        const show = ['sonos','bluesound','beoplay'].includes(e.target.value);
         document.getElementById('cfg-player-ip-cond').classList.toggle('show', show);
         const r = document.getElementById('cfg-player-results');
         if (r) { r.innerHTML = ''; r.classList.remove('show'); }
@@ -1502,7 +1504,7 @@ function updateIrDropdowns() {
 async function discoverPlayer(event) {
     const btn = event.currentTarget;
     const playerType = document.getElementById('cfg-player-type')?.value || 'sonos';
-    const endpoint = playerType === 'bluesound' ? '/discover/bluesound' : '/discover/sonos';
+    const endpoint = ['bluesound','beoplay'].includes(playerType) ? '/discover/' + playerType : '/discover/sonos';
     const resultEl = document.getElementById('cfg-player-results');
     btn.textContent = 'Scanning...'; btn.disabled = true;
     resultEl.classList.remove('show');
@@ -1563,8 +1565,12 @@ async function testPlayerConn(event) {
     const ip = document.getElementById('cfg-player-ip')?.value?.trim();
     if (!ip) { btn.textContent = 'No IP'; return; }
     btn.textContent = 'Testing...';
+    const playerType = document.getElementById('cfg-player-type')?.value || 'sonos';
+    const probeUrl = playerType === 'beoplay' ? `http://${ip}:8080/BeoDevice`
+                   : playerType === 'bluesound' ? `http://${ip}:11000/Status`
+                   : `http://${ip}:1400/xml/device_description.xml`;
     try {
-        await fetch(`http://${ip}:1400/xml/device_description.xml`, { signal: AbortSignal.timeout(3000), mode: 'no-cors' });
+        await fetch(probeUrl, { signal: AbortSignal.timeout(3000), mode: 'no-cors' });
         btn.textContent = 'Reachable ✓'; btn.className = 'btn-subtle ok';
     } catch(e) {
         btn.textContent = e.name === 'TimeoutError' ? 'Timed out' : 'Unreachable'; btn.className = 'btn-subtle fail';
@@ -1597,7 +1603,7 @@ function buildConfig() {
     cfg.device = document.getElementById('cfg-device')?.value || cfg.device;
     const pt = document.getElementById('cfg-player-type')?.value;
     cfg.player = cfg.player || {}; cfg.player.type = pt;
-    if (['sonos','bluesound'].includes(pt)) { cfg.player.ip = document.getElementById('cfg-player-ip')?.value || ''; }
+    if (['sonos','bluesound','beoplay'].includes(pt)) { cfg.player.ip = document.getElementById('cfg-player-ip')?.value || ''; }
     else { delete cfg.player.ip; }
     const vt = document.getElementById('cfg-volume-type')?.value;
     cfg.volume = cfg.volume || {}; cfg.volume.type = vt;
