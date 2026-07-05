@@ -35,9 +35,12 @@ class BeoplayVolume(VolumeAdapter):
         if self._device is None:
             return
         try:
-            # pybeoplay uses a 0-1 scale
+            # ``volume`` is already in the device's hardware scale (the router
+            # maps UI 0-100 → 0-volume.max before calling us). pybeoplay takes
+            # a 0-1 value and sends int(value*100) as the device level, so a
+            # hardware value of e.g. 35 (of max 50) → level 35.
             await self._device.async_set_volume(volume / 100.0)
-            logger.info("-> BeoPlay volume: %.0f%%", volume)
+            logger.info("-> BeoPlay volume: hw level %.0f", volume)
         except Exception as e:
             logger.warning("BeoPlay unreachable: %s", e)
 
@@ -48,8 +51,10 @@ class BeoplayVolume(VolumeAdapter):
             await self._device.async_get_volume()
             if self._device.volume is None:
                 return None
+            # Return the raw device level (hardware scale); the router applies
+            # _hw_to_ui with volume.max to get the 0-100 UI value.
             vol = round(self._device.volume * 100)
-            logger.info("BeoPlay volume read: %d%%", vol)
+            logger.info("BeoPlay volume read: hw level %d", vol)
             return float(vol)
         except Exception as e:
             logger.warning("Could not read BeoPlay volume: %s", e)

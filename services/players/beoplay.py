@@ -74,9 +74,9 @@ class BeoplayPlayer(PlayerBase):
                 if not station_id:
                     logger.error("Empty station id in %s", url)
                     return False
-                if not self._device.on:
-                    await self._device.async_turn_on()
-                await self._device.async_play_radio_station(station_id)
+                if not await self._play_beoradio_station(station_id):
+                    logger.error("BeoPlay rejected B&O Radio station %s", station_id)
+                    return False
                 self._current_track_uri = url
                 if meta:
                     self._cache_media_from_meta(meta)
@@ -91,6 +91,29 @@ class BeoplayPlayer(PlayerBase):
         except Exception as e:
             logger.error("Play failed: %s", e)
             return False
+
+    async def _play_beoradio_station(self, station_id: str) -> bool:
+        """Play a specific B&O Radio station.
+
+        B&O Radio stations are selected by activating the BEO RADIO source
+        with the station's ``contentId`` (POST /BeoZone/Zone/ActiveSources),
+        which starts playback automatically. The play-queue/instantplay route
+        used for TuneIn is rejected on BEO RADIO sources with 403 "PQ with id
+        radio doesn't exist!". Reports the POST result so a rejected play
+        doesn't look like success.
+        """
+        dev = self._device
+        if not dev.on:
+            await dev.async_turn_on()
+        # Find this speaker's B&O Radio source id (beoradio:...@...).
+        if not dev.sourcesID:
+            await dev.async_get_sources()
+        src_id = next((sid for sid in dev.sourcesID
+                       if sid.startswith("beoradio:")), None)
+        if not src_id:
+            logger.warning("No B&O Radio (beoradio:) source found on %s", self.ip)
+            return False
+        return await dev.async_play_beoradio_station(src_id, station_id)
 
     async def pause(self) -> bool:
         try:
@@ -254,7 +277,8 @@ class BeoplayPlayer(PlayerBase):
 
             self._current_playback_state = state
 
-            # Volume reporting (0-1 → 0-100; base method deduplicates)
+            # Volume reporting (raw device level; router maps to UI via
+            # _hw_to_ui/volume.max; base method deduplicates)
             if self._device.volume is not None:
                 self._spawn(
                     self.report_volume_to_router(round(self._device.volume * 100)),
@@ -266,6 +290,23 @@ class BeoplayPlayer(PlayerBase):
             album = self._device.media_album or ""
             if not (title or artist):
                 return
+
+            # B&O Radio reports the station name as "artist" and the live
+            # programme as "track". The now-playing view shows the title line
+            # largest, so for radio put the station there and the programme
+            # underneath (otherwise the long programme text dominates and the
+            # channel is relegated to a smaller line).
+            # Detect net radio from the speaker's active source (works even
+            # when playback started outside our session, e.g. after a restart)
+            # and fall back to our own play URI for the just-started case.
+            is_netradio = (
+                (self._device.source_id or "").startswith(("beoradio:", "radio:"))
+                or (self._current_track_uri or "").startswith(NETRADIO_URL_PREFIX)
+            )
+            if is_netradio:
+                disp_title, disp_artist = (artist or "—"), (title or "—")
+            else:
+                disp_title, disp_artist = (title or "—"), (artist or "—")
 
             track_id = f"{title}|{artist}|{album}"
             if track_id != self._current_track_id:
@@ -281,8 +322,8 @@ class BeoplayPlayer(PlayerBase):
                         artwork_size = result["size"]
 
                 media_data = {
-                    "title": title or "—",
-                    "artist": artist or "—",
+                    "title": disp_title,
+                    "artist": disp_artist,
                     "album": album or "—",
                     "artwork": f"data:image/jpeg;base64,{artwork_base64}" if artwork_base64 else None,
                     "artwork_size": artwork_size,
