@@ -23,6 +23,7 @@ from aiohttp import web, ClientSession
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from lib.config import cfg
+from lib.endpoints import player_url
 from lib.source_base import SourceBase
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -204,6 +205,9 @@ class RadioService(SourceBase):
         self._sr_channel_images: dict[str, bytes] = {}  # uuid → PNG bytes
         self._sr_artwork_cache: dict[str, tuple[str, bytes]] = {}  # uuid → (title, image bytes)
         self._sr_poll_task: asyncio.Task | None = None
+        # BeoPlay speakers only play their built-in B&O Radio (netRadio)
+        # favourites — internet-radio streams can't be sent to them.
+        self._beoplay_mode = str(cfg("player", "type", default="")).lower() == "beoplay"
 
     async def on_start(self):
         self._api_session = ClientSession(
@@ -407,6 +411,10 @@ class RadioService(SourceBase):
             )
             return self._station_list(lang.title(), f"languages/{lang}", "languages", stations)
 
+        if category == "bo_radio":
+            stations = await self._fetch_beoplay_favorites()
+            return self._station_list("B&O Radio", "bo_radio", "", stations)
+
         if category == "favourites":
             self._browse_stations = list(self._favourites)
             return {
@@ -419,6 +427,20 @@ class RadioService(SourceBase):
         return {"path": path, "parent": "", "name": "Unknown", "items": []}
 
     def _root_categories(self) -> dict:
+        if self._beoplay_mode:
+            # Only the speaker's own B&O Radio favourites are playable —
+            # hide the internet-radio categories.
+            return {
+                "path": "",
+                "parent": None,
+                "name": "Radio",
+                "items": [
+                    {"type": "category", "name": "B&O Radio", "id": "bo_radio", "path": "bo_radio",
+                     "icon": "star", "color": "#F9CA24"},
+                    {"type": "category", "name": "Favourites", "id": "favourites", "path": "favourites",
+                     "icon": "heart", "color": "#FF6B6B"},
+                ],
+            }
         return {
             "path": "",
             "parent": None,
@@ -476,6 +498,38 @@ class RadioService(SourceBase):
             "votes": s.get("votes", 0),
             "subtitle": " · ".join(subtitle_parts),
         }
+
+    async def _fetch_beoplay_favorites(self) -> list:
+        """Fetch the BeoPlay speaker's B&O Radio favourites from the player
+        service and map them to the station-dict shape used everywhere else.
+
+        The synthetic ``beoplay://netradio/<id>`` URL flows unchanged through
+        ``player_play(url=...)`` to the beoplay player backend."""
+        try:
+            async with self._http_session.get(
+                player_url("/beoplay/radio_favorites"), timeout=15
+            ) as resp:
+                if resp.status != 200:
+                    log.warning("BeoPlay favourites fetch returned %d", resp.status)
+                    return []
+                data = await resp.json()
+        except Exception as e:
+            log.warning("BeoPlay favourites fetch failed: %s", e)
+            return []
+        return [
+            {
+                "stationuuid": f"beoplay-{f['station']}",
+                "name": f.get("name", "Unknown"),
+                "url_resolved": f"beoplay://netradio/{f['station']}",
+                "favicon": "",
+                "country": "",
+                "tags": "B&O Radio",
+                "codec": "",
+                "bitrate": 0,
+            }
+            for f in data.get("favorites", [])
+            if f.get("station")
+        ]
 
     # ── Radio Browser API client ──
 
