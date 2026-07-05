@@ -49,13 +49,13 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["sonos", "bluesound"],
-          "description": "Player type. Determines which player service handles playback. Both beo-player-sonos and beo-player-bluesound are installed; the type guard ensures only the matching one runs."
+          "enum": ["sonos", "bluesound", "beoplay"],
+          "description": "Player type. Determines which player service handles playback. All player services are installed; the type guard ensures only the matching one runs."
         },
         "ip": {
           "type": "string",
           "format": "ipv4",
-          "description": "IP address of the player device (Sonos speaker or BluOS player)."
+          "description": "IP address of the player device (Sonos speaker, BluOS player, or B&O BeoPlay speaker)."
         }
       },
       "additionalProperties": false
@@ -127,13 +127,13 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["beolab5", "sonos", "bluesound", "powerlink", "c4amp", "hdmi", "spdif", "rca"],
-          "description": "Volume adapter type. If omitted, inferred from player.type for sonos/bluesound, otherwise defaults to 'beolab5'.",
+          "enum": ["beolab5", "sonos", "bluesound", "beoplay", "powerlink", "c4amp", "hdmi", "spdif", "rca"],
+          "description": "Volume adapter type. If omitted, inferred from player.type for sonos/bluesound/beoplay, otherwise defaults to 'beolab5'.",
           "default": "beolab5"
         },
         "host": {
           "type": "string",
-          "description": "Target host for volume control. Defaults vary by adapter type: 'beolab5-controller.local' for beolab5, player IP for sonos/bluesound, 'localhost' for powerlink."
+          "description": "Target host for volume control. Defaults vary by adapter type: 'beolab5-controller.local' for beolab5, player IP for sonos/bluesound/beoplay, 'localhost' for powerlink."
         },
         "max": {
           "type": "integer",
