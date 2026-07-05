@@ -165,6 +165,60 @@ scan_bluesound_devices() {
     fi
 }
 
+# Scan for B&O BeoPlay/NetworkLink devices on the network
+scan_beoplay_devices() {
+    # NOTE: stdout is captured by mapfile — log messages must go to stderr.
+    log_info "Scanning for B&O BeoPlay devices on the network..." >&2
+    local beoplay_devices=()
+    local timeout=2
+
+    # Method 1: Try avahi/mDNS discovery (_beoremote._tcp is the BeoPlay service type)
+    if command -v avahi-browse &>/dev/null; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                local ip="${BASH_REMATCH[1]}"
+                if timeout $timeout bash -c "echo >/dev/tcp/$ip/8080" 2>/dev/null; then
+                    local name=$(curl -s --connect-timeout $timeout "http://$ip:8080/BeoDevice" 2>/dev/null | grep -oP '(?<="friendlyName":")[^"]+' | head -1)
+                    if [ -n "$name" ]; then
+                        beoplay_devices+=("$ip|$name")
+                    else
+                        beoplay_devices+=("$ip|BeoPlay Device")
+                    fi
+                fi
+            fi
+        done < <(avahi-browse -rtp _beoremote._tcp 2>/dev/null | grep "=" | head -10)
+    fi
+
+    # Method 2: Fallback - scan for the BeoPlay API (port 8080, /BeoDevice) on local network
+    if [ ${#beoplay_devices[@]} -eq 0 ]; then
+        log_info "Scanning local network for BeoPlay devices (port 8080)..." >&2
+        local tmpfile
+        tmpfile=$(mktemp)
+        (
+            while IFS= read -r ip; do
+                if timeout $timeout bash -c "echo >/dev/tcp/$ip/8080" 2>/dev/null; then
+                    local name=$(curl -s --connect-timeout $timeout "http://$ip:8080/BeoDevice" 2>/dev/null | grep -oP '(?<="friendlyName":")[^"]+' | head -1)
+                    if [ -n "$name" ]; then
+                        echo "$ip|$name" >> "$tmpfile"
+                    fi
+                fi
+            done < <(get_local_network_ips)
+        ) &
+        local scan_pid=$!
+        sleep 10
+        kill $scan_pid 2>/dev/null
+        wait $scan_pid 2>/dev/null
+        while IFS= read -r line; do
+            beoplay_devices+=("$line")
+        done < "$tmpfile"
+        rm -f "$tmpfile"
+    fi
+
+    if [ ${#beoplay_devices[@]} -gt 0 ]; then
+        printf '%s\n' "${beoplay_devices[@]}"
+    fi
+}
+
 # Detect Home Assistant on the network
 detect_home_assistant() {
     # NOTE: This function's stdout is captured by mapfile — all log

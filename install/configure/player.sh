@@ -21,6 +21,7 @@ configure_player() {
     echo "  1) Sonos      - Sonos speaker (most common)"
     echo "  2) BlueSound  - BlueSound player"
     echo "  3) Local      - Local from the BeoSound 5c"
+    echo "  4) BeoPlay    - B&O NetworkLink speaker (Beosound Stage, CA17, ...)"
     echo ""
 
     # Determine default based on current config
@@ -29,19 +30,21 @@ configure_player() {
         sonos)     default_choice="1" ;;
         bluesound) default_choice="2" ;;
         none)      default_choice="3" ;;
+        beoplay)   default_choice="4" ;;
     esac
 
     local PLAYER_TYPE=""
     local PLAYER_IP=""
 
     while true; do
-        read -p "Select player type [1-3, default $default_choice]: " PLAYER_CHOICE
+        read -p "Select player type [1-4, default $default_choice]: " PLAYER_CHOICE
         PLAYER_CHOICE="${PLAYER_CHOICE:-$default_choice}"
         case "$PLAYER_CHOICE" in
             1) PLAYER_TYPE="sonos"; break ;;
             2) PLAYER_TYPE="bluesound"; break ;;
             3) PLAYER_TYPE="none"; break ;;
-            *) echo "Invalid selection. Please enter 1, 2, or 3." ;;
+            4) PLAYER_TYPE="beoplay"; break ;;
+            *) echo "Invalid selection. Please enter 1, 2, 3, or 4." ;;
         esac
     done
 
@@ -101,6 +104,35 @@ configure_player() {
             log_info "Make sure your Bluesound player is powered on and connected to the same network"
             local default_ip="${current_ip:-192.168.1.100}"
             read -p "Enter Bluesound player IP address [$default_ip]: " PLAYER_IP
+            PLAYER_IP="${PLAYER_IP:-$default_ip}"
+        fi
+    elif [[ "$PLAYER_TYPE" == "beoplay" ]]; then
+        # Scan for B&O BeoPlay devices
+        mapfile -t beoplay_results < <(scan_beoplay_devices)
+
+        if [ ${#beoplay_results[@]} -gt 0 ]; then
+            local beoplay_display=()
+            for result in "${beoplay_results[@]}"; do
+                local ip name
+                ip=$(echo "$result" | cut -d'|' -f1)
+                name=$(echo "$result" | cut -d'|' -f2)
+                beoplay_display+=("$name ($ip)")
+            done
+
+            log_success "Found ${#beoplay_results[@]} BeoPlay device(s)!"
+
+            if selection=$(select_from_list "Select BeoPlay speaker to control:" "${beoplay_display[@]}"); then
+                PLAYER_IP=$(echo "$selection" | grep -oP '\(([0-9.]+)\)' | tr -d '()')
+            else
+                local default_ip="${current_ip:-192.168.1.100}"
+                read -p "Enter BeoPlay speaker IP address [$default_ip]: " PLAYER_IP
+                PLAYER_IP="${PLAYER_IP:-$default_ip}"
+            fi
+        else
+            log_warn "No BeoPlay devices found on the network"
+            log_info "Make sure your BeoPlay speaker is powered on and connected to the same network"
+            local default_ip="${current_ip:-192.168.1.100}"
+            read -p "Enter BeoPlay speaker IP address [$default_ip]: " PLAYER_IP
             PLAYER_IP="${PLAYER_IP:-$default_ip}"
         fi
     fi

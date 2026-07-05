@@ -113,6 +113,40 @@ configure_audio() {
                 *) echo "Invalid selection. Please enter 1-7." ;;
             esac
         done
+    elif [[ "$player_type" == "beoplay" ]]; then
+        echo "  1) BeoPlay     - Control volume directly on the BeoPlay speaker (Recommended)"
+        echo "  2) BeoLab 5    - BeoLab 5 via controller REST API"
+        echo "  3) PowerLink   - B&O speakers via MasterLink mixer"
+        echo "  4) C4 Amp      - Control4 amplifier via UDP"
+        echo "  5) HDMI        - HDMI audio output (ALSA software volume)"
+        echo "  6) S/PDIF      - S/PDIF HAT output (ALSA software volume)"
+        echo "  7) RCA         - RCA analog output (no volume control)"
+        echo ""
+
+        case "$current_vol_type" in
+            beoplay)   default_vol_choice="1" ;;
+            beolab5)   default_vol_choice="2" ;;
+            powerlink) default_vol_choice="3" ;;
+            c4amp)     default_vol_choice="4" ;;
+            hdmi)      default_vol_choice="5" ;;
+            spdif)     default_vol_choice="6" ;;
+            rca)       default_vol_choice="7" ;;
+        esac
+
+        while true; do
+            read -p "Select volume control [1-7, default $default_vol_choice]: " VOLUME_CHOICE
+            VOLUME_CHOICE="${VOLUME_CHOICE:-$default_vol_choice}"
+            case "$VOLUME_CHOICE" in
+                1) VOLUME_TYPE="beoplay"; break ;;
+                2) VOLUME_TYPE="beolab5"; break ;;
+                3) VOLUME_TYPE="powerlink"; break ;;
+                4) VOLUME_TYPE="c4amp"; break ;;
+                5) VOLUME_TYPE="hdmi"; break ;;
+                6) VOLUME_TYPE="spdif"; break ;;
+                7) VOLUME_TYPE="rca"; break ;;
+                *) echo "Invalid selection. Please enter 1-7." ;;
+            esac
+        done
     else
         echo "  1) PowerLink   - B&O speakers via MasterLink mixer (Recommended)"
         echo "  2) BeoLab 5    - BeoLab 5 via controller REST API"
@@ -153,7 +187,7 @@ configure_audio() {
             read -p "BeoLab 5 controller hostname [$DEFAULT_VOLUME_HOST]: " VOLUME_HOST
             VOLUME_HOST="${VOLUME_HOST:-$DEFAULT_VOLUME_HOST}"
             ;;
-        sonos|bluesound)
+        sonos|bluesound|beoplay)
             VOLUME_HOST="$player_ip"
             log_info "Using player IP ($player_ip) for volume control"
             ;;
