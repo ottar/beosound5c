@@ -16,7 +16,7 @@ Runs on a [Raspberry Pi 5 4GB](https://www.raspberrypi.com/products/raspberry-pi
 2. Clone and run the installer:
 
 ```bash
-git clone https://github.com/mkirsten/beosound5c.git ~/beosound5c
+git clone --recurse-submodules https://github.com/mkirsten/beosound5c.git ~/beosound5c
 cd ~/beosound5c
 sudo ./install/install.sh
 ```

@@ -30,6 +30,18 @@ log() { echo "[post-update] $*"; }
 
 log "Starting (base=$BASE_DIR, user=$SERVICE_USER)"
 
+# ── 0. Sync vendored git submodules (external/) ─────────────────────────────
+# Git installs get/refresh submodules here. OTA release tarballs contain no
+# submodule files, but the OTA rsync runs without --delete, so a previously
+# initialised external/ copy survives tarball updates untouched.
+if [ -d "$BASE_DIR/.git" ] && command -v git &>/dev/null; then
+    if sudo -u "$SERVICE_USER" git -C "$BASE_DIR" submodule update --init --recursive; then
+        log "Submodules synced"
+    else
+        log "WARNING: submodule sync failed — vendored libraries may be missing"
+    fi
+fi
+
 # ── 1. Refresh installed systemd service files ───────────────────────────────
 # OTA rsync only updates ~/beosound5c/services/system/ templates. This step
 # re-stamps any already-installed service into /etc/systemd/system/ so that

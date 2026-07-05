@@ -1,0 +1,4 @@
+[submodule "external/pybeoplay"]
+	path = external/pybeoplay
+	url = https://github.com/ottar/pybeoplay
+	branch = master

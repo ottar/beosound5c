@@ -30,6 +30,17 @@ publish the same facts libpc2 tabulates in `masterlink/telegram.hpp` and
 The soft-arc geometry in `web/js/arcs.js` is derived from Beolyd5's arc
 rendering. Inline comment in that file points at the upstream source.
 
+## pybeoplay
+
+- **Upstream**: <https://github.com/giachello/pybeoplay>
+- **Author**: Giovanni Iachello
+- **License**: MIT
+- **Compatibility**: MIT is compatible with GPL-3.0-or-later.
+
+Consumed unmodified via the fork <https://github.com/ottar/pybeoplay> as a
+git submodule at `external/pybeoplay`. Wraps the BeoPlay (NetworkLink) HTTP
+API used by the `beoplay` player backend and volume adapter.
+
 ## B&O MLGW02 specification
 
 - **Source**: "MLGW Protocol specification, MLGW02, rev 3, 12-Nov-2014"

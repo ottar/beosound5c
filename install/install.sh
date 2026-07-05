@@ -290,6 +290,16 @@ run_system_setup() {
     install_usb_music_support
 }
 
+sync_submodules() {
+    # Vendored libraries (e.g. external/pybeoplay) live in git submodules.
+    # Only possible on git installs — OTA tarball updates keep the previously
+    # initialised copy (rsync runs without --delete).
+    if [ -d "$INSTALL_DIR/.git" ] && command -v git &>/dev/null; then
+        git -C "$INSTALL_DIR" submodule update --init --recursive || \
+            log_warn "Submodule sync failed — vendored libraries may be missing"
+    fi
+}
+
 # =============================================================================
 # Subcommand dispatch
 # =============================================================================
@@ -340,6 +350,7 @@ case "$SUBCOMMAND" in
             log_error "Service installation requires root (use sudo)"
             exit 1
         fi
+        sync_submodules
         install_services
         ;;
 
@@ -363,6 +374,7 @@ case "$SUBCOMMAND" in
     full)
         show_banner
         run_preflight_checks
+        sync_submodules
         run_system_setup
         ensure_default_config
         install_services
