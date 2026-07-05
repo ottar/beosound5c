@@ -78,6 +78,8 @@ cat > /tmp/beo-sudoers-new << EOF
 # BeoSound 5c — UI kiosk and config management
 $SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/pkill, /usr/bin/fbi, /usr/bin/plymouth, /sbin/reboot, /usr/sbin/reboot
 $SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/beosound5c/config.json
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/cat /etc/beosound5c/secrets.env
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/beosound5c/secrets.env
 $SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart beo-*
 $SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop beo-*
 $SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl start beo-*
