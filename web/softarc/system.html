@@ -1142,9 +1142,13 @@
                 },
             },
             {
-                id: 'sonos',
-                title: 'SONOS',
-                service: 'beo-player-sonos',
+                // Active player. All player backends (Sonos, BlueSound,
+                // BeoPlay, Local) share port 8766 — only one runs at a time —
+                // so the card's label and systemd service follow whichever
+                // player is actually running (data.player / data.name).
+                id: 'player',
+                title: (data) => (data && data.name ? data.name : 'Player').toUpperCase(),
+                service: (data) => (data && data.player) ? `beo-player-${data.player}` : 'beo-player-sonos',
                 fetch: async () => {
                     const resp = await fetch('http://localhost:8766/player/status');
                     if (!resp.ok) throw new Error('offline');
@@ -1153,7 +1157,8 @@
                 render: (data) => {
                     if (!data) return '<div class="subcard-body">' + row('Status', 'No data', 'dim') + '</div>';
                     let html = '<div class="subcard-body">';
-                    html += row('Speaker', data.speaker_name);
+                    if (data.name) html += row('Backend', data.name);
+                    if (data.speaker_name) html += row('Speaker', data.speaker_name);
                     html += row('IP', data.speaker_ip);
                     html += row('State', data.state, data.state === 'playing' ? 'ok' : '');
                     if (data.volume !== undefined && data.volume !== null) html += row('Volume', data.volume + '%');
@@ -1162,9 +1167,9 @@
                         html += row('Artist', trunc(data.current_track.artist, 40));
                         html += row('Album', trunc(data.current_track.album, 40));
                     }
-                    html += row('Grouped', data.is_grouped ? data.coordinator_name : 'No');
-                    html += row('Art Cache', data.artwork_cache_size + ' items');
-                    html += row('WS Clients', data.ws_clients);
+                    if (data.is_grouped !== undefined) html += row('Grouped', data.is_grouped ? data.coordinator_name : 'No');
+                    if (data.artwork_cache_size !== undefined) html += row('Art Cache', data.artwork_cache_size + ' items');
+                    if (data.ws_clients !== undefined) html += row('WS Clients', data.ws_clients);
                     html += '</div>';
                     return html;
                 },
@@ -1537,7 +1542,7 @@
                 const container = document.getElementById('subcard-container');
                 let html = '<div class="subcard-header">';
                 html += `<span class="subcard-status-dot ${online ? 'online' : 'offline'}"></span>`;
-                html += `<span class="subcard-title">${card.title}</span>`;
+                html += `<span class="subcard-title">${typeof card.title === 'function' ? card.title(data) : card.title}</span>`;
                 html += `<span class="subcard-counter">${this.currentSubcard + 1} / ${SUBCARDS.length}</span>`;
                 html += '</div>';
 
@@ -1940,7 +1945,9 @@
 
             restartSubcardService() {
                 const card = SUBCARDS[this.currentSubcard];
-                if (!card.service) {
+                const cardService = typeof card.service === 'function'
+                    ? card.service(this.subcardData[card.id]) : card.service;
+                if (!cardService) {
                     // SYSTEM card — restart all
                     if (this.inputWs && this.inputWs.readyState === WebSocket.OPEN) {
                         this.inputWs.send(JSON.stringify({
@@ -1957,7 +1964,7 @@
                 setTimeout(() => { container.style.opacity = '1'; }, 400);
 
                 if (this.inputWs && this.inputWs.readyState === WebSocket.OPEN) {
-                    const action = 'restart-' + card.service.replace('beo-', '');
+                    const action = 'restart-' + cardService.replace('beo-', '');
                     this.inputWs.send(JSON.stringify({
                         type: 'command', command: 'restart_service',
                         params: { action: action }
