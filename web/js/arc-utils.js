@@ -18,7 +18,10 @@ const ArcMath = (() => {
             baseXOffset:          _sa.baseXOffset ?? 100,
             scrollSpeed:          _sa.scrollSpeed ?? 0.5,
             scrollStep:           _sa.scrollStep ?? 0.5,
-            snapDelay:            _sa.snapDelay ?? 1000,
+            snapDelay:            _sa.snapDelay ?? 0010,
+            scaleFactor:          _sa.scaleFactor ?? 0.10,
+            scaleFloor:           _sa.scaleFloor ?? 0.58,
+            arcRadius:            _sa.arcRadius ?? 620,
         };
     }
 
@@ -31,8 +34,8 @@ const ArcMath = (() => {
      * @param {number} [opts.maxRadius]
      * @param {number} [opts.horizontalMultiplier]
      * @param {number} [opts.baseItemSize]
-     * @param {number} [opts.scaleFactor=0.15]  - Scale falloff per unit distance.
-     * @param {number} [opts.scaleFloor=0.4]    - Minimum scale.
+     * @param {number} [opts.scaleFactor]  - Scale falloff per unit distance (default Constants.softarc.scaleFactor).
+     * @param {number} [opts.scaleFloor]   - Minimum scale (default Constants.softarc.scaleFloor).
      * @param {number} [opts.padding=20]         - Vertical gap between items.
      * @returns {{ x: number, y: number, scale: number, opacity: number }}
      */
@@ -43,13 +46,20 @@ const ArcMath = (() => {
         const maxRadius         = opts.maxRadius ?? c.maxRadius;
         const horizontalMult    = opts.horizontalMultiplier ?? c.horizontalMultiplier;
         const baseItemSize      = opts.baseItemSize ?? c.baseItemSize;
-        const scaleFactor       = opts.scaleFactor ?? 0.15;
-        const scaleFloor        = opts.scaleFloor ?? 0.4;
+        const scaleFactor       = opts.scaleFactor ?? c.scaleFactor;
+        const scaleFloor        = opts.scaleFloor ?? c.scaleFloor;
         const padding           = opts.padding ?? 20;
+        const arcRadius         = opts.arcRadius ?? c.arcRadius;
 
         const scale = Math.max(scaleFloor, 1.0 - absPos * scaleFactor);
-        const x     = baseXOffset + absPos * maxRadius * horizontalMult;
         const y     = actualRelativePos * (baseItemSize * scale + padding);
+        // Horizontal position follows a true circle of radius arcRadius
+        // (like the original BeoSound 5 arc): items bow left at the centre
+        // and curve right toward the ends. Falls back to the old linear
+        // model when arcRadius is 0/unset (maxRadius × horizontalMultiplier).
+        const x = arcRadius > 0
+            ? baseXOffset + (arcRadius - Math.sqrt(Math.max(0, arcRadius * arcRadius - y * y)))
+            : baseXOffset + absPos * maxRadius * horizontalMult;
 
         return { x, y, scale, opacity: 1 };
     }

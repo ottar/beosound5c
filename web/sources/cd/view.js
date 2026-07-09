@@ -208,9 +208,11 @@ window.CDView = (() => {
         arcCurrentIndex = arcTargetIndex;
     }
 
-    /** Compute visible items with position/scale — delegates to shared ArcMath. */
+    /** Compute visible items with position/scale — delegates to shared ArcMath.
+     * Keeps the 128px vertical pitch (CD rows carry 128px artwork badges);
+     * the shared constant is tuned tighter for the text-only lists. */
     function getVisibleItems() {
-        return ArcMath.getVisibleItems(arcCurrentIndex, arcItems);
+        return ArcMath.getVisibleItems(arcCurrentIndex, arcItems, { baseItemSize: 128 });
     }
 
     /**

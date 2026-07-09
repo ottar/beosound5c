@@ -131,7 +131,7 @@ class ArcList {
 
     async init() {
         await this.loadData();
-        this.restoreState();
+        await this.restoreState();
         this.setupEventListeners();
         this.startAnimation();
         this.updateCounter();
@@ -226,18 +226,18 @@ class ArcList {
         }
     }
 
-    restoreState() {
+    async restoreState() {
         try {
             const raw = localStorage.getItem(this.STORAGE_KEY);
             if (!raw) return;
             const state = JSON.parse(raw);
             if (state.version !== 2) return;
 
-            // With childrenLoader, can't re-fetch past levels synchronously — only restore root scroll
+            // With childrenLoader, re-fetch each saved level asynchronously so
+            // the user returns to exactly where they were drilled in (e.g.
+            // MUSIC → artist → album), not just the root.
             if (this.config.childrenLoader) {
-                if (state.depth !== 0) return;
-                this.currentIndex = Math.max(0, Math.min(this.items.length - 1, state.currentIndex));
-                this.targetIndex = this.currentIndex;
+                await this._restoreViaLoader(state);
                 return;
             }
 
@@ -294,6 +294,64 @@ class ArcList {
         } catch (e) {
             console.error('Error restoring state:', e);
         }
+    }
+
+    /** Restore a drilled-in position for childrenLoader-backed lists by
+     * re-fetching each saved level in turn (mirrors drillDown, but silent —
+     * no animation). Stops early if the saved item is gone or the data
+     * changed, leaving the user at the deepest level that still resolves. */
+    async _restoreViaLoader(state) {
+        // Depth 0 (or no saved stack): just restore the root scroll position.
+        if (!state.stack || state.stack.length === 0) {
+            this.currentIndex = Math.max(0, Math.min(this.items.length - 1, state.currentIndex));
+            this.targetIndex = this.currentIndex;
+            return;
+        }
+
+        for (const frame of state.stack) {
+            const mappedItems = this.items;  // current level, already mapped
+            let idx = mappedItems.findIndex(it => it.id === frame.selectedItemId);
+            if (idx < 0) idx = Math.min(frame.selectedIndex, mappedItems.length - 1);
+            if (idx < 0) break;
+
+            const item = mappedItems[idx];
+            if (!this.isContainer(item)) break;
+
+            let rawChildren;
+            try {
+                rawChildren = await this.config.childrenLoader(item, this.depth);
+            } catch (e) {
+                console.warn('Restore: childrenLoader failed, stopping at depth', this.depth, e);
+                break;
+            }
+            if (!rawChildren || rawChildren.length === 0) break;
+
+            this.navStack.push({
+                items: this.items,
+                rawItems: this._getCurrentRawItems(),
+                loadedChildren: rawChildren,
+                selectedIndex: idx,
+                selectedItem: item,
+                breadcrumbElement: null,
+            });
+            this.items = this.mapItems(rawChildren, this.depth + 1);
+            this.depth++;
+        }
+
+        // Restore scroll position within the deepest resolved level.
+        this.currentIndex = Math.max(0, Math.min(this.items.length - 1, state.currentIndex));
+        this.targetIndex = this.currentIndex;
+
+        this._createBreadcrumbsFromStack();
+        if (this.depth > 0) {
+            const bg = document.getElementById('hierarchy-background');
+            if (bg) {
+                bg.classList.add('active');
+                bg.style.opacity = Math.min(this.depth * 0.3, 0.8);
+            }
+        }
+        this.totalItemsDisplay.textContent = this.items.length;
+        console.log('Restored (loader) at depth', this.depth);
     }
 
     // ─── NAVIGATION: DRILL DOWN / GO BACK ────────────────────────────
@@ -816,7 +874,7 @@ class ArcList {
         // Custom onGo callback — let the callback decide what's actionable
         if (this.config.onGo) {
             const el = this.container.querySelector('.arc-item.selected');
-            if (el) {
+            if (el && item.actionable !== false) {
                 el.classList.add('go-flash');
                 setTimeout(() => el.classList.remove('go-flash'), 400);
             }
@@ -1048,6 +1106,10 @@ class ArcList {
             const isSelected = Math.abs(item.index - this.currentIndex) < 0.5;
             if (isSelected) el.classList.add('selected');
 
+            // Section header row (e.g. Discover list titles) — styled distinctly
+            if (item.header) el.classList.add('arc-header');
+            // Row with a small cover left of the text (Discover items)
+            if (item.cover) el.classList.add('arc-cover');
             // Actionable detection (blue highlight on GO-able items)
             if (this.isActionable(item)) el.classList.add('actionable');
             // Container/page detection (stack effect for drill-down-able items)

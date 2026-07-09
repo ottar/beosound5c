@@ -44,16 +44,23 @@ fi
 
 # ── 1. Refresh installed systemd service files ───────────────────────────────
 # OTA rsync only updates ~/beosound5c/services/system/ templates. This step
-# re-stamps any already-installed service into /etc/systemd/system/ so that
+# re-stamps every registry-listed service into /etc/systemd/system/ so that
 # changes (e.g. port, capabilities, env vars) take effect on next restart.
+# Services NEW to the registry are installed too — installing a unit file
+# doesn't enable or start it; reconcile-services.sh decides what runs.
 TEMPLATE_DIR="$BASE_DIR/services/system"
 SYSTEMD_DIR="/etc/systemd/system"
 CHANGED=0
 
+source "$TEMPLATE_DIR/service-registry.sh"
+
 for template in "$TEMPLATE_DIR"/beo-*.service; do
     svc="$(basename "$template")"
     target="$SYSTEMD_DIR/$svc"
-    [ -f "$target" ] || continue   # don't install new services — that's install.sh's job
+    if [ ! -f "$target" ]; then
+        # Only install new units that the registry knows about
+        printf '%s\n' "${ALL_SERVICES[@]}" | grep -qx "$svc" || continue
+    fi
 
     new=$(sed \
         -e "s|__USER__|$SERVICE_USER|g" \

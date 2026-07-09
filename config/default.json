@@ -41,7 +41,8 @@
     "output_name": "Sonos"
   },
   "cd": { "device": "/dev/sr0" },
-  "join": {},
+  "join": { "overlay_timeout": 15 },
+  "music_assistant": { "url": "" },
   "spotify": { "client_id": "" },
   "radio": { "source": "radio" },
   "news": { "guardian_api_key": "test" },

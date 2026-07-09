@@ -350,6 +350,11 @@ const CFG_SOURCE_DEFS = [
     { key: 'RADIO', label: 'Radio', fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['radio','source'], isIr: true, optional: true },
     ]},
+    { key: 'MUSIC', label: 'Music Assistant',
+      hint: 'Browses the Music Assistant library. Uses the MA server and token from the Player card (player type Music Assistant).',
+      fields: [
+        { fid: 'ir_source', label: 'IR trigger', path: ['music_assistant','source'], isIr: true, optional: true },
+    ]},
     { key: 'CD', label: 'CD', fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['cd','source'], isIr: true, optional: true },
         { fid: 'device', label: 'Device path', path: ['cd','device'], placeholder: '/dev/sr0' },
@@ -373,10 +378,11 @@ const CFG_SOURCE_DEFS = [
 // [id, label, compatible-player-types (space-separated)]
 const VOLUME_TYPES = [
     ['sonos',     'Sonos',          'sonos'],
-    ['beolab5',   'BeoLab 5',       'sonos bluesound local'],
+    ['beolab5',   'BeoLab 5',       'sonos bluesound local music_assistant'],
     ['powerlink', 'PowerLink',      'local'],
     ['bluesound', 'Bluesound',      'bluesound'],
-    ['beoplay',   'BeoPlay speaker','beoplay'],
+    ['beoplay',   'BeoPlay speaker','beoplay music_assistant'],
+    ['music_assistant', 'Music Assistant (group)', 'music_assistant'],
     ['hdmi',      'HDMI',           'local'],
     ['spdif',     'S/PDIF',         'local'],
     ['rca',       'RCA',            'local'],
@@ -389,13 +395,14 @@ const VOLUME_HOST_TYPES = ['beolab5', 'bluesound', 'c4amp'];
 // handles bass/treble/loudness) — hide those tone controls for these.
 // Balance is broader: it's applied pre-output in our PipeWire chain
 // even for beolab5, so only the truly remote outputs exclude it.
-const TONE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay', 'beolab5'];
-const BALANCE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay'];
+const TONE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay', 'beolab5', 'music_assistant'];
+const BALANCE_EXCLUDED_TYPES = ['sonos', 'bluesound', 'beoplay', 'music_assistant'];
 
 const CFG_SOURCE_VIEWS = {
     'PLAYING':'playing','JOIN':'join','SPOTIFY':'spotify','TIDAL':'tidal',
     'APPLE MUSIC':'apple_music','PLEX':'plex','RADIO':'radio','CD':'cd',
-    'USB':'usb','NEWS':'news','SCENES':'scenes','SYSTEM':'system','SHOWING':'showing',
+    'USB':'usb','NEWS':'news','MUSIC':'music_assistant',
+    'SCENES':'scenes','SYSTEM':'system','SHOWING':'showing',
 };
 
 let _cfg = null;
@@ -438,7 +445,8 @@ function renderDevice(cfg) {
 
 function renderPlayer(cfg) {
     const p = cfg.player || {};
-    const showIp = p.type === 'sonos' || p.type === 'bluesound' || p.type === 'beoplay';
+    const showIp = ['sonos','bluesound','beoplay','music_assistant'].includes(p.type);
+    const showMa = p.type === 'music_assistant';
     return `<div class="cfg-card">
         <h2>Player</h2>
         <label for="cfg-player-type">Type</label>
@@ -446,6 +454,7 @@ function renderPlayer(cfg) {
             <option value="sonos" ${p.type==='sonos'?'selected':''}>Sonos</option>
             <option value="bluesound" ${p.type==='bluesound'?'selected':''}>Bluesound</option>
             <option value="beoplay" ${p.type==='beoplay'?'selected':''}>B&amp;O BeoPlay</option>
+            <option value="music_assistant" ${p.type==='music_assistant'?'selected':''}>Music Assistant</option>
             <option value="local" ${p.type==='local'?'selected':''}>Local (mpv)</option>
         </select>
         <div id="cfg-player-ip-cond" class="cfg-cond${showIp?' show':''}">
@@ -456,6 +465,11 @@ function renderPlayer(cfg) {
                 <button class="btn-subtle" onclick="discoverPlayer(event)">Discover</button>
             </div>
             <div id="cfg-player-results" class="cfg-discover-list"></div>
+        </div>
+        <div id="cfg-player-ma-cond" class="cfg-cond${showMa?' show':''}">
+            <label for="cfg-mass-token">MA access token <span style="color:#333;font-weight:400">(leave blank to keep existing)</span></label>
+            <input id="cfg-mass-token" type="password" placeholder="Long-lived token from MA Settings → Users" autocomplete="new-password">
+            <div class="hint">The speaker this BS5c plays on is picked in the JOIN menu on the device.</div>
         </div>
     </div>`;
 }
@@ -1325,8 +1339,9 @@ function setupListeners() {
         if (link) link.href = (e.target.value.trim().replace(/\/$/, '') || '') + '/profile';
     });
     document.getElementById('cfg-player-type')?.addEventListener('change', e => {
-        const show = ['sonos','bluesound','beoplay'].includes(e.target.value);
+        const show = ['sonos','bluesound','beoplay','music_assistant'].includes(e.target.value);
         document.getElementById('cfg-player-ip-cond').classList.toggle('show', show);
+        document.getElementById('cfg-player-ma-cond')?.classList.toggle('show', e.target.value === 'music_assistant');
         const r = document.getElementById('cfg-player-results');
         if (r) { r.innerHTML = ''; r.classList.remove('show'); }
         updateVolumeOptions();
@@ -1474,16 +1489,24 @@ function updateVolumeOptions() {
     if (!volSelect) return;
     const currentVal = volSelect.value;
     const compatible = VOLUME_TYPES.filter(([,, c]) => c.split(' ').includes(playerType));
+    // Prefer the adapter matching the new player type: a stale-but-compatible
+    // selection (e.g. beoplay volume kept after switching the player to
+    // music_assistant) leaves the wheel bound to the old speaker.
+    const pick = compatible.some(([v]) => v === playerType) ? playerType
+               : compatible.some(([v]) => v === currentVal) ? currentVal
+               : compatible[0]?.[0];
     volSelect.innerHTML = compatible.map(([v, l]) =>
-        `<option value="${v}" ${v === currentVal ? 'selected' : ''}>${l}</option>`
+        `<option value="${v}" ${v === pick ? 'selected' : ''}>${l}</option>`
     ).join('');
-    // If previously selected type is no longer compatible, pick first option
-    if (!compatible.some(([v]) => v === currentVal)) {
-        const first = compatible[0];
-        if (first) volSelect.value = first[0];
+    // MA volume is a logical 0–100 scale (the hardware ceiling lives in MA
+    // itself) — a max inherited from a speaker-hardware adapter (e.g.
+    // beoplay's 50) silently caps the wheel at half the range.
+    if (pick === 'music_assistant' && currentVal !== 'music_assistant') {
+        const maxEl = document.getElementById('cfg-volume-max');
+        if (maxEl) maxEl.value = 100;
     }
-    const newVal = volSelect.value;
-    document.getElementById('cfg-volume-host-cond')?.classList.toggle('show', VOLUME_HOST_TYPES.includes(newVal));
+    // Sync dependent fields (host input, tone/balance visibility)
+    volSelect.dispatchEvent(new Event('change'));
 }
 
 function updateIrDropdowns() {
@@ -1504,6 +1527,12 @@ function updateIrDropdowns() {
 async function discoverPlayer(event) {
     const btn = event.currentTarget;
     const playerType = document.getElementById('cfg-player-type')?.value || 'sonos';
+    if (playerType === 'music_assistant') {
+        // No mDNS discovery for MA — the server address is entered manually
+        btn.textContent = 'Enter IP manually';
+        setTimeout(() => { btn.textContent = 'Discover'; }, 3000);
+        return;
+    }
     const endpoint = ['bluesound','beoplay'].includes(playerType) ? '/discover/' + playerType : '/discover/sonos';
     const resultEl = document.getElementById('cfg-player-results');
     btn.textContent = 'Scanning...'; btn.disabled = true;
@@ -1568,6 +1597,7 @@ async function testPlayerConn(event) {
     const playerType = document.getElementById('cfg-player-type')?.value || 'sonos';
     const probeUrl = playerType === 'beoplay' ? `http://${ip}:8080/BeoDevice`
                    : playerType === 'bluesound' ? `http://${ip}:11000/Status`
+                   : playerType === 'music_assistant' ? `http://${ip}:8095/info`
                    : `http://${ip}:1400/xml/device_description.xml`;
     try {
         await fetch(probeUrl, { signal: AbortSignal.timeout(3000), mode: 'no-cors' });
@@ -1603,7 +1633,7 @@ function buildConfig() {
     cfg.device = document.getElementById('cfg-device')?.value || cfg.device;
     const pt = document.getElementById('cfg-player-type')?.value;
     cfg.player = cfg.player || {}; cfg.player.type = pt;
-    if (['sonos','bluesound','beoplay'].includes(pt)) { cfg.player.ip = document.getElementById('cfg-player-ip')?.value || ''; }
+    if (['sonos','bluesound','beoplay','music_assistant'].includes(pt)) { cfg.player.ip = document.getElementById('cfg-player-ip')?.value || ''; }
     else { delete cfg.player.ip; }
     const vt = document.getElementById('cfg-volume-type')?.value;
     cfg.volume = cfg.volume || {}; cfg.volume.type = vt;
@@ -1705,6 +1735,8 @@ function buildConfig() {
     if (mqttUser) _secrets.mqtt_user = mqttUser;
     const mqttPass = document.getElementById('cfg-mqtt-password')?.value?.trim();
     if (mqttPass) _secrets.mqtt_password = mqttPass;
+    const massToken = document.getElementById('cfg-mass-token')?.value?.trim();
+    if (massToken) _secrets.mass_token = massToken;
     if (Object.keys(_secrets).length) cfg._secrets = _secrets;
     return cfg;
 }

@@ -198,6 +198,85 @@ class TestVolumeReportCooldown:
         asyncio.run(run())
 
 
+class TestVolumeOutputName:
+    """Player-reported output name follows the wheel's real target.
+
+    The MA player reports which speaker/group the master volume drives
+    ("Beosound Stage", "Bokhylle +1"). The router must adopt the name and
+    push it to the UI overlay even when the volume value itself is
+    deduped or inside the local-set cooldown — otherwise a PLAY ON
+    target switch leaves the overlay naming the old speaker.
+    """
+
+    def _make_router(self):
+        router = make_router()
+        router._accept_player_volume = True
+        router._volume = MagicMock()
+        router._volume._max_volume = 100
+        router._volume.set_volume = AsyncMock()
+        router._volume.is_on_cached = MagicMock(return_value=True)
+        router.media.broadcast = AsyncMock()
+        return router
+
+    def test_name_change_broadcast_despite_volume_dedup(self):
+        router = self._make_router()
+        router._last_local_volume_set = 0.0
+        router.volume = 42
+        router.output_device = "Beoplay M3"
+
+        async def run():
+            await router.report_volume(42, "Beosound Stage")
+            assert router.output_device == "Beosound Stage"
+            router.media.broadcast.assert_awaited_once()
+            event, payload = router.media.broadcast.await_args.args
+            assert event == "volume_update"
+            assert payload["output_device"] == "Beosound Stage"
+
+        asyncio.run(run())
+
+    def test_name_change_broadcast_despite_cooldown(self):
+        router = self._make_router()
+        router.output_device = "Beosound Stage"
+
+        async def run():
+            await router.set_volume(50)
+            router.media.broadcast.reset_mock()
+            # Mid-cooldown report: volume value must be suppressed but
+            # the group-size change ("+1") must still reach the UI.
+            await router.report_volume(47, "Beosound Stage +1")
+            assert router.volume == 50
+            assert router.output_device == "Beosound Stage +1"
+            router.media.broadcast.assert_awaited_once()
+
+        asyncio.run(run())
+
+    def test_report_without_name_keeps_configured_output(self):
+        router = self._make_router()
+        router._last_local_volume_set = 0.0
+        router.volume = 40
+        router.output_device = "Beoplay M3"
+
+        async def run():
+            await router.report_volume(55)
+            assert router.output_device == "Beoplay M3"
+            payload = router.media.broadcast.await_args.args[1]
+            assert payload == {"volume": 55, "output_device": "Beoplay M3"}
+
+        asyncio.run(run())
+
+    def test_same_name_same_volume_no_broadcast(self):
+        router = self._make_router()
+        router._last_local_volume_set = 0.0
+        router.volume = 42
+        router.output_device = "Beosound Stage"
+
+        async def run():
+            await router.report_volume(42, "Beosound Stage")
+            router.media.broadcast.assert_not_awaited()
+
+        asyncio.run(run())
+
+
 class TestVolumeScaling:
     """UI 0–100 ↔ hardware 0–max_volume scaling.
 

@@ -10,6 +10,13 @@ sonos_env/
 
 # macOS
 .DS_Store
+._*
+
+# Per-device state (generated on the device, not source)
+device_id
+
+# On-device artwork cache
+web/assets/cd-cache/
 
 # Cloudflare Wrangler cache
 .wrangler/

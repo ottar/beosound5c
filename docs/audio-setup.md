@@ -20,6 +20,7 @@ The player service handles network-based playback. Sources send play commands to
 |---|---|---|
 | Sonos | `spotify`, `url_stream` | ShareLink (Spotify, Apple Music, TIDAL) or `play_uri` (URLs) |
 | BlueSound | `url_stream` | BluOS HTTP API with stream URLs |
+| Music Assistant | `music_assistant`, `url_stream`, `radio` | MA websocket API (`player_queues/play_media`) on any MA player |
 | Local | `spotify`, `url_stream` | mpv via PipeWire/PulseAudio; Spotify via go-librespot |
 
 Only one player is active — determined by `player.type` in config.json. The type guard in PlayerBase ensures only the matching player service starts.
@@ -64,6 +65,28 @@ The BluOS player handles playback via its HTTP/XML API. The BS5c sends commands 
 "player": { "type": "bluesound", "ip": "192.168.1.100" },
 "volume": { "type": "bluesound", "host": "192.168.1.100", "max": 70 }
 ```
+
+### Music Assistant
+
+A [Music Assistant](https://www.music-assistant.io/) server (2.9+) handles playback on any of its players (AirPlay, universal players, Sonos, ...). The BS5c talks to the MA websocket API, monitors playback via MA's event stream, and adds the MUSIC source for browsing the MA library (artists, albums, playlists, tracks, radio).
+
+The *target speaker* — which MA player this BS5c drives — is picked at runtime in the JOIN menu ("PLAY ON <speaker>" entries) and persists across restarts in `/etc/beosound5c/music_assistant_state.json`. The same JOIN menu groups/ungroups other MA players with the target (+/− entries), and "UNGROUP ALL" dissolves the group. Switching target while music plays transfers the queue.
+
+**Volume** is two-layered. The wheel drives the `music_assistant` volume adapter: with a grouped target it sets MA's *group volume*, which scales every member proportionally; a solo target gets a plain volume set. Individual speakers are trimmed in the JOIN menu — highlight a speaker and turn the volume wheel to adjust just that one (each row shows a small volume bar). MA preserves those trims when the group volume changes. The volume overlay's output label follows the target at runtime: it shows the target speaker's name, with a `+N` suffix while grouped (e.g. "Beosound Stage +1"), so a PLAY ON switch is visible on the wheel immediately.
+
+**Config:**
+```json
+"player": { "type": "music_assistant", "ip": "192.168.1.100" },
+"menu": { "MUSIC": "music_assistant" }
+```
+
+`player.ip` is the MA server. With no explicit `volume.type`, the `music_assistant` adapter is inferred automatically. To drive a specific device's hardware volume instead (ignoring groups), point the adapter elsewhere, e.g. `"volume": { "type": "beoplay", "output_name": "Beoplay M3", "max": 50 }`.
+
+**Secrets** (`/etc/beosound5c/secrets.env`):
+- `MASS_TOKEN` — required. Long-lived token from MA → Settings → Users.
+- `MASS_WS_URL` — optional override, e.g. `ws://musicassistant.local:8095/ws`. Defaults to `ws://<player.ip>:8095/ws`.
+
+With the MA player active, the Radio source's internet-radio categories work too (MA plays arbitrary stream URLs).
 
 ### PowerLink
 
@@ -153,6 +176,7 @@ The router sends volume commands through whichever adapter matches the configure
 |---|---|---|---|---|
 | `sonos` | 50ms | No | No | `player.ip` (default) |
 | `bluesound` | 50ms | No | No | `player.ip` (default) |
+| `music_assistant` | 50ms | No | No | N/A (local player service, group-aware) |
 | `beolab5` | 100ms | Yes | Yes | `beolab5-controller.local` (default) |
 | `powerlink` | 50ms | Yes | Yes | `localhost:8768` (default) |
 | `c4amp` | 50ms | Yes | No | Required (`volume.host`) |

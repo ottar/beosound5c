@@ -88,13 +88,31 @@ const Constants = {
     // Softarc positioning (shared by ArcList, CD view, Spotify view, etc.)
     softarc: {
         scrollSpeed: 0.5,
-        scrollStep: 0.5,
+        scrollStep: 1.0,
         snapDelay: 1000,
         middleIndex: 4,
-        baseItemSize: 128,
+        // Tuned so text-only lists (MUSIC/JOIN/menu) sit against the volume
+        // wheel's arc guide (centre 1024,384 r274 → leftmost x≈750) with a
+        // full 4 rows visible above/below centre and nothing pushed off the
+        // right edge. baseItemSize is the vertical row pitch; the horizontal
+        // multiplier is deliberately gentle so distant rows curve just
+        // slightly right instead of shooting off-screen. The CD view keeps
+        // 128px artwork and overrides baseItemSize back to 128 (see cd/view.js).
+        baseItemSize: 72,
         maxRadius: 220,
-        horizontalMultiplier: 0.35,
-        baseXOffset: 100
+        horizontalMultiplier: 0.16,
+        baseXOffset: 110,
+        // Original BeoSound 5 barely shrinks the outer rows — they stay
+        // near full size; only the *selected* row is emphasised (via a
+        // larger CSS font). Near-flat shrink (0.06/row, floor 0.84).
+        scaleFactor: 0.06,
+        scaleFloor: 0.84,
+        // Horizontal curve radius: rows' left edges lie on a circle of this
+        // radius so the list follows a smooth arc (concave-left, bowing out
+        // at centre) like the original, instead of a linear "V". Larger =
+        // gentler. maxRadius/horizontalMultiplier above are the legacy
+        // linear fallback used only when arcRadius is 0.
+        arcRadius: 620
     },
 
     // Placeholder artwork SVGs.

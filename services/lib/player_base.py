@@ -165,7 +165,7 @@ class PlayerBase:
         self._monitor_task: asyncio.Task | None = None
         self._current_playback_state: str | None = None
         self._cached_media_data: dict | None = None
-        self._last_reported_volume: int | None = None
+        self._last_reported_volume: tuple[int, str | None] | None = None
         self._last_internal_command: float = 0.0  # monotonic timestamp
         self._latest_action_ts: float = 0.0  # action timestamp for race prevention
         self._background_tasks = BackgroundTaskSet(log, label=f"{self.id or 'player'}")
@@ -781,20 +781,28 @@ class PlayerBase:
         except Exception as e:
             log.warning("Could not trigger output power on: %s", e)
 
-    async def report_volume_to_router(self, volume: int):
+    async def report_volume_to_router(self, volume: int,
+                                      output_name: str | None = None):
         """Report a volume change to the router so the UI arc stays in sync.
 
-        Deduplicates — only sends if volume actually changed.
+        ``output_name`` optionally names the speaker/group the volume
+        applies to (e.g. the MA target after PLAY ON) so the router's
+        volume overlay can follow it.
+
+        Deduplicates — only sends if volume or output name actually changed.
         """
-        if volume == self._last_reported_volume:
+        if (volume, output_name) == self._last_reported_volume:
             return
-        self._last_reported_volume = volume
+        self._last_reported_volume = (volume, output_name)
         if not self._session_ready():
             return
+        payload = {"volume": volume}
+        if output_name:
+            payload["output_name"] = output_name
         try:
             async with self._http_session.post(
                 ROUTER_VOLUME_REPORT_URL,
-                json={"volume": volume},
+                json=payload,
                 timeout=aiohttp.ClientTimeout(total=2),
             ) as resp:
                 if resp.status == 200:

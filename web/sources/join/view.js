@@ -1,10 +1,16 @@
 /**
  * JOIN View Controller
  *
- * Discovers Sonos devices playing on the network and lets the user
- * join this speaker to another group. Arc browser pattern matches CD view.
+ * Speaker grouping, in two flavours keyed on the active player type
+ * (from /player/status):
  *
- * Context: menu/join — Arc list of playing Sonos devices. GO joins selected.
+ *  - sonos: discovers Sonos devices playing on the network; GO joins
+ *    this speaker to the selected group. Arc pattern matches CD view.
+ *  - music_assistant: lists MA players; GO toggles group membership
+ *    relative to the current target speaker (+name adds, −name removes),
+ *    and "PLAY ON name" entries switch the playback target.
+ *
+ * Context: menu/join — Arc list of speakers. GO acts on selected.
  */
 window.JoinView = (() => {
     const PLAYER_URL = window.AppConfig?.playerUrl || 'http://localhost:8766';
@@ -14,6 +20,7 @@ window.JoinView = (() => {
     let mountGen = 0;   // increments per init(); suspended stale inits bail
     let devices = [];
     let isGrouped = false;
+    let playerType = '';  // from /player/status — selects sonos vs MA mode
     let defaultPlayer = null;  // from config (fetched once)
     let loading = false;
     let pollTimer = null;
@@ -112,6 +119,7 @@ window.JoinView = (() => {
                 if (statusResp.ok) {
                     const status = await statusResp.json();
                     isGrouped = !!status.is_grouped;
+                    playerType = status.player || '';
                 }
             } catch (e) {
                 console.warn('[JOIN] Network fetch failed:', e);
@@ -153,6 +161,7 @@ window.JoinView = (() => {
             if (statusResp.ok) {
                 const status = await statusResp.json();
                 isGrouped = !!status.is_grouped;
+                playerType = status.player || '';
             }
         } catch { return; }
 
@@ -280,6 +289,10 @@ window.JoinView = (() => {
     // ── Arc Browser ──
 
     function buildArcItems() {
+        if (playerType === 'music_assistant') {
+            buildMaArcItems();
+            return;
+        }
         // Sort: default player first, then by tier (playing > has content > empty),
         // then alphabetical within each tier
         function tier(d) {
@@ -331,6 +344,75 @@ window.JoinView = (() => {
         })));
     }
 
+    /** Music Assistant mode: target marker + group toggles + PLAY ON entries.
+     *
+     * /player/network items: {id, name, state, is_target, in_group,
+     * can_join, volume, title, artist, album, artwork_url, group}. The
+     * target is sorted first by the player service.
+     */
+    function buildMaArcItems() {
+        arcItems = [];
+        const target = devices.find(d => d.is_target);
+        const others = devices.filter(d => !d.is_target);
+
+        function base(d) {
+            return {
+                type: 'device',
+                ip: d.id,      // selection-preservation key (see refreshDevices)
+                deviceId: d.id,
+                volume: d.volume ?? null,  // wheel-trimmable (see handleVolumeEvent)
+                state: d.state,
+                hasContent: !!(d.title || d.artwork_url),
+                artworkUrl: d.artwork_url || '',
+                title: d.title || '',
+                artist: d.artist || '',
+                album: d.album || '',
+                group: [],
+                sublabel: d.artist ? `${d.artist} — ${d.title}` : (d.title || ''),
+            };
+        }
+
+        if (isGrouped) {
+            arcItems.push({
+                id: 'unjoin', label: 'UNGROUP ALL', sublabel: '', type: 'unjoin',
+                ip: '', state: '', hasContent: true, artworkUrl: '',
+                title: '', artist: '', album: '', group: [],
+            });
+        }
+
+        if (target) {
+            arcItems.push({
+                ...base(target),
+                id: `ma-target-${target.id}`,
+                type: 'ma-current',
+                label: `▸ ${target.name}`,
+                group: target.group || [],
+                sublabel: base(target).sublabel || 'THIS SPEAKER',
+            });
+        }
+
+        // Group toggles relative to the target
+        for (const d of others) {
+            if (!target || (!d.in_group && !d.can_join)) continue;
+            arcItems.push({
+                ...base(d),
+                id: `ma-toggle-${d.id}`,
+                type: d.in_group ? 'ma-group-remove' : 'ma-group-add',
+                label: `${d.in_group ? '−' : '+'} ${d.name}`,
+            });
+        }
+
+        // Target switching
+        for (const d of others) {
+            arcItems.push({
+                ...base(d),
+                id: `ma-playon-${d.id}`,
+                type: 'ma-target',
+                label: `PLAY ON ${d.name}`,
+            });
+        }
+    }
+
     function getVisibleItems() {
         return ArcMath.getVisibleItems(arcCurrentIndex, arcItems);
     }
@@ -360,6 +442,11 @@ window.JoinView = (() => {
             } else if (!item.isSelected && element.classList.contains('cd-arc-item-selected')) {
                 element.classList.remove('cd-arc-item-selected');
                 if (nameEl) nameEl.classList.remove('selected');
+            }
+
+            const fillEl = element.querySelector('.join-vol-fill');
+            if (fillEl && item.volume != null) {
+                fillEl.style.width = `${item.volume}%`;
             }
         });
 
@@ -417,6 +504,17 @@ window.JoinView = (() => {
                 textEl.appendChild(subEl);
             }
 
+            // Per-speaker volume bar (MA rows) — wheel trims the highlighted one
+            if (item.volume != null) {
+                const vol = document.createElement('div');
+                vol.className = 'join-vol';
+                const fill = document.createElement('div');
+                fill.className = 'join-vol-fill';
+                fill.style.width = `${item.volume}%`;
+                vol.appendChild(fill);
+                textEl.appendChild(vol);
+            }
+
             el.appendChild(textEl);
 
             // Badge
@@ -456,7 +554,9 @@ window.JoinView = (() => {
         container.innerHTML = '';
         const msg = document.createElement('div');
         msg.className = 'join-empty';
-        msg.innerHTML = 'No speakers found<br><span style="font-size:13px;opacity:0.5">Check that other Sonos speakers are on the network</span>';
+        msg.innerHTML = playerType === 'music_assistant'
+            ? 'No speakers found<br><span style="font-size:13px;opacity:0.5">Check that players are available in Music Assistant</span>'
+            : 'No speakers found<br><span style="font-size:13px;opacity:0.5">Check that other Sonos speakers are on the network</span>';
         container.appendChild(msg);
     }
 
@@ -551,6 +651,56 @@ window.JoinView = (() => {
         return false;
     }
 
+    /** Volume wheel over an MA speaker row trims THAT speaker's volume
+     * (hardware-input.js offers views the wheel before the global master
+     * volume). Sonos mode and non-speaker rows (UNGROUP ALL) return
+     * false, so the wheel keeps meaning group/master volume there. */
+    let memberVolTimer = null;
+
+    function handleVolumeEvent(data) {
+        if (!menuActive || playerType !== 'music_assistant' || !arcItems.length) {
+            return false;
+        }
+        const item = arcItems[Math.round(arcCurrentIndex)];
+        if (!item?.deviceId || item.volume == null) return false;
+
+        // Match the master volume wheel's feel (hardware-input.js): fine,
+        // non-linear step with fractional accumulation instead of the old
+        // round(speed/10), which stepped individual volume too coarsely.
+        const direction = data.direction === 'clock' ? 1 : -1;
+        const scale = 1.5 - (item.volume / 100) * 0.9;
+        item.volume = Math.max(0, Math.min(100, item.volume + direction * (data.speed || 10) / 14 * scale));
+
+        // Immediate visual feedback — the animation loop only repaints on
+        // arc movement, so patch the bar directly.
+        const container = document.getElementById('join-arc-container');
+        const fillEl = container
+            ?.querySelector(`[data-item-id="${item.id}"] .join-vol-fill`);
+        if (fillEl) fillEl.style.width = `${item.volume}%`;
+
+        // Keep the backing device snapshot in sync so a rebuild
+        // (buildMaArcItems on poll) doesn't snap the bar back.
+        const dev = devices.find(d => d.id === item.deviceId);
+        if (dev) dev.volume = item.volume;
+
+        sendMemberVolume(item.deviceId, item.volume);
+        return true;
+    }
+
+    /** Debounced POST /player/member_volume — same 50 ms pattern as the
+     * master volume path in hardware-input.js. */
+    function sendMemberVolume(deviceId, volume) {
+        if (memberVolTimer) clearTimeout(memberVolTimer);
+        memberVolTimer = setTimeout(() => {
+            memberVolTimer = null;
+            fetch(`${PLAYER_URL}/player/member_volume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: deviceId, volume: Math.round(volume) }),
+            }).catch(e => console.warn('[JOIN] Member volume failed:', e));
+        }, 50);
+    }
+
     function handleButton(button) {
         if (!menuActive || !arcItems.length) return false;
 
@@ -570,6 +720,16 @@ window.JoinView = (() => {
 
             if (item.type === 'unjoin') {
                 unjoinDevice();
+            } else if (item.type === 'ma-group-add') {
+                maCommand('join', item.deviceId);
+            } else if (item.type === 'ma-group-remove') {
+                maCommand('unjoin', item.deviceId);
+            } else if (item.type === 'ma-target') {
+                maCommand('select_target', item.deviceId, /*navigate=*/item.hasContent);
+            } else if (item.type === 'ma-current') {
+                if (window.uiStore?.navigateToView) {
+                    window.uiStore.navigateToView('menu/playing');
+                }
             } else {
                 joinDevice(item);
             }
@@ -577,6 +737,29 @@ window.JoinView = (() => {
         }
 
         return false;
+    }
+
+    /** POST a Music Assistant player action and refresh the list in place. */
+    async function maCommand(action, deviceId, navigate = false) {
+        console.log(`[JOIN] MA ${action}: ${deviceId}`);
+        try {
+            const resp = await fetch(`${PLAYER_URL}/player/${action}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: deviceId }),
+            });
+            if (!resp.ok) {
+                console.error(`[JOIN] MA ${action} failed: HTTP ${resp.status}`);
+                return;
+            }
+            if (navigate && window.uiStore?.navigateToView) {
+                window.uiStore.navigateToView('menu/playing');
+                return;
+            }
+            await refreshDevices();
+        } catch (e) {
+            console.warn(`[JOIN] MA ${action} failed:`, e);
+        }
     }
 
     async function unjoinDevice() {
@@ -645,6 +828,7 @@ window.JoinView = (() => {
         destroy,
         handleNavEvent,
         handleButton,
+        handleVolumeEvent,
         get isActive() { return menuActive; },
     };
 })();

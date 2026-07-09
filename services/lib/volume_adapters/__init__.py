@@ -10,6 +10,7 @@ Supported types:
   - ``sonos``                  – Sonos speaker via SoCo library
   - ``bluesound``              – BlueSound speaker via BluOS HTTP API
   - ``beoplay``                – B&O BeoPlay/NetworkLink speaker via pybeoplay
+  - ``music_assistant``        – group-aware volume via the MA player service
   - ``powerlink``              – B&O speakers via masterlink.py mixer HTTP API
   - ``c4amp``                  – Control4 amplifier via UDP
   - ``hdmi``                   – HDMI1 audio output (ALSA software volume)
@@ -29,6 +30,7 @@ from .bluesound import BluesoundVolume
 from .c4amp import C4AmpVolume
 from .hdmi import HdmiVolume
 from .local import LocalVolume
+from .music_assistant import MusicAssistantVolume
 from .powerlink import PowerLinkVolume
 from .rca import RcaVolume
 from .sonos import SonosVolume
@@ -44,6 +46,7 @@ __all__ = [
     "BluesoundVolume",
     "C4AmpVolume",
     "HdmiVolume",
+    "MusicAssistantVolume",
     "PowerLinkVolume",
     "RcaVolume",
     "SonosVolume",
@@ -57,13 +60,14 @@ def infer_volume_type() -> str:
     """Infer the volume adapter type from config.json.
 
     Returns the explicit ``volume.type`` if set, otherwise derives it from
-    ``player.type``: sonos/bluesound/beoplay map to themselves, local/powerlink
-    map to "powerlink", everything else defaults to "beolab5".
+    ``player.type``: sonos/bluesound/beoplay/music_assistant map to
+    themselves, local/powerlink map to "powerlink", everything else
+    defaults to "beolab5".
     """
     vol_type = cfg("volume", "type")
     if vol_type is None:
         player_type = str(cfg("player", "type", default="")).lower()
-        if player_type in ("sonos", "bluesound", "beoplay"):
+        if player_type in ("sonos", "bluesound", "beoplay", "music_assistant"):
             vol_type = player_type
         elif player_type in ("local", "powerlink"):
             vol_type = "powerlink"
@@ -77,10 +81,11 @@ def create_volume_adapter(session: aiohttp.ClientSession) -> VolumeAdapter:
 
     Reads from config.json "volume" section:
       type        – "beolab5", "sonos", "bluesound", "beoplay",
-                    "powerlink", "c4amp", "hdmi", "spdif", or "rca".
+                    "music_assistant", "powerlink", "c4amp", "hdmi",
+                    "spdif", or "rca".
                     If omitted, defaults to player.type for
-                    sonos/bluesound/beoplay, "powerlink" for local/powerlink,
-                    otherwise "beolab5".
+                    sonos/bluesound/beoplay/music_assistant, "powerlink"
+                    for local/powerlink, otherwise "beolab5".
       host        – target host/IP (not used by hdmi/spdif/rca/powerlink-localhost)
       max         – max volume percentage (default 70)
       zone        – C4 amp output zone, e.g. "01" (c4amp only, default "01")
@@ -116,6 +121,10 @@ def create_volume_adapter(session: aiohttp.ClientSession) -> VolumeAdapter:
     elif vol_type == "beoplay":
         logger.info("Volume adapter: BeoPlay @ %s (max %d%%)", vol_host, vol_max)
         return BeoplayVolume(vol_host, vol_max, session)
+    elif vol_type == "music_assistant":
+        logger.info("Volume adapter: Music Assistant via player service "
+                    "(max %d%%)", vol_max)
+        return MusicAssistantVolume(vol_max, session)
     elif vol_type == "sonos":
         logger.info("Volume adapter: Sonos @ %s (max %d%%)", vol_host, vol_max)
         return SonosVolume(vol_host, vol_max)

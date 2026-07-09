@@ -36,7 +36,9 @@ class FakeBeoPlay:
         self.media_url = None
         self.source = None
         self.async_turn_on = AsyncMock()
-        self.async_play_radio_station = AsyncMock()
+        self.sourcesID = ["beoradio:1234.5678@products.bang-olufsen.com"]
+        self.async_get_sources = AsyncMock()
+        self.async_play_beoradio_station = AsyncMock(return_value=True)
         self.async_play = AsyncMock()
         self.async_pause = AsyncMock()
         self.async_stop = AsyncMock()
@@ -55,7 +57,8 @@ def player():
 def test_play_netradio_station(player):
     ok = _run(player.play(url=f"{NETRADIO_URL_PREFIX}s12345", radio=True))
     assert ok is True
-    player._device.async_play_radio_station.assert_awaited_once_with("s12345")
+    player._device.async_play_beoradio_station.assert_awaited_once_with(
+        "beoradio:1234.5678@products.bang-olufsen.com", "s12345")
     # Speaker was already on — no turn_on
     player._device.async_turn_on.assert_not_awaited()
     assert _run(player.get_track_uri()) == f"{NETRADIO_URL_PREFIX}s12345"
@@ -71,7 +74,7 @@ def test_play_netradio_wakes_speaker_from_standby(player):
 def test_play_rejects_plain_stream_url(player):
     ok = _run(player.play(url="http://example.com/stream.mp3", radio=True))
     assert ok is False
-    player._device.async_play_radio_station.assert_not_awaited()
+    player._device.async_play_beoradio_station.assert_not_awaited()
 
 
 def test_play_rejects_empty_station_id(player):

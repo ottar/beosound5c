@@ -88,6 +88,16 @@ power_button_pressed_at = 0.0  # wall time of the current press (long-press dete
 # ML broadcast so link speakers in other rooms power down too).
 POWER_LONGPRESS_ALL_STANDBY = 5.0
 
+# GO button: edge-detected so exactly one event fires per physical press
+# (emitted on release) — single-fire is what makes JS double-tap timing
+# reliable. Classified by hold time: short -> 'go', held >= GO_LONGPRESS_S
+# -> 'go_long' (selects/plays-on the highlighted speaker in the speaker
+# overlay). The double-tap that OPENS the overlay is detected in
+# hardware-input.js.
+go_button_state = 0         # 0 = released, 1 = pressed
+go_button_pressed_at = 0.0  # wall time of the current GO press
+GO_LONGPRESS_S = 0.6
+
 def is_backlight_on():
     """Check backlight state from the hardware state byte."""
     return (state_byte1 & 0x40) != 0
@@ -793,7 +803,8 @@ async def handle_config_save(request):
 
     # Extract secrets — they go to secrets.env, not config.json
     raw_secrets = body.pop('_secrets', None) or {}
-    _SECRET_KEY_MAP = {'ha_token': 'HA_TOKEN', 'mqtt_user': 'MQTT_USER', 'mqtt_password': 'MQTT_PASSWORD'}
+    _SECRET_KEY_MAP = {'ha_token': 'HA_TOKEN', 'mqtt_user': 'MQTT_USER', 'mqtt_password': 'MQTT_PASSWORD',
+                       'mass_token': 'MASS_TOKEN', 'mass_ws_url': 'MASS_WS_URL'}
     secrets_to_write = {
         _SECRET_KEY_MAP[k]: v
         for k, v in raw_secrets.items()
@@ -1640,6 +1651,7 @@ async def receive_commands(ws):
 
 def parse_report(rep: list, loop=None):
     global last_power_press_time, power_button_state, power_button_pressed_at
+    global go_button_state, go_button_pressed_at
     if len(rep) < 4:
         logger.warning("Truncated HID report (%d bytes), ignoring", len(rep))
         return None, None, None, None
@@ -1663,9 +1675,21 @@ def parse_report(rep: list, loop=None):
     b = rep[3]
     is_power_pressed = (b & 0x80) != 0  # Check if power bit is set
     
-    # Only create button events for non-power buttons
-    if b in BTN_MAP and b != 0x80:
+    # Only create button events for non-power, non-GO buttons.
+    # GO is edge-detected below (release-classified into short/long).
+    if b in BTN_MAP and b not in (0x80, 0x40):
         btn_evt = {'button': BTN_MAP[b]}
+
+    # GO button: one event per press, classified on release (short/long).
+    is_go_pressed = (b == 0x40)
+    if is_go_pressed:
+        if go_button_state == 0:
+            go_button_state = 1
+            go_button_pressed_at = time.time()
+    elif go_button_state == 1:
+        go_button_state = 0
+        held = time.time() - go_button_pressed_at if go_button_pressed_at else 0.0
+        btn_evt = {'button': 'go_long' if held >= GO_LONGPRESS_S else 'go'}
     
     # State machine for power button
     if is_power_pressed:

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music - Beosound 5c</title>
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="../assets/favicons/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="../assets/favicons/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicons/favicon-32x32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../assets/favicons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="../assets/favicons/android-chrome-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="../assets/favicons/android-chrome-512x512.png">
+    <link rel="manifest" href="../assets/favicons/site.webmanifest">
+    <meta name="theme-color" content="#000000">
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../assets/phosphor/phosphor.css">
+</head>
+<body>
+    <div id="app">
+        <div class="counter">
+            <div id="counter-path"></div>
+            <span id="current-item">1</span> / <span id="total-items">0</span>
+        </div>
+        <div class="hierarchy-depth-1" id="hierarchy-background"></div>
+        <div class="arc-container" id="arc-container"></div>
+    </div>
+
+    <script src="../js/config.js"></script>
+    <script src="../js/arc-utils.js"></script>
+    <script src="../js/emulator-bridge.js"></script>
+    <script src="script-v2.js"></script>
+    <script>
+        const MA_URL = (typeof AppConfig !== 'undefined' && AppConfig.musicAssistantServiceUrl)
+            ? AppConfig.musicAssistantServiceUrl
+            : 'http://localhost:8780';
+
+        async function fetchBrowse(path) {
+            const resp = await fetch(`${MA_URL}/browse?path=${encodeURIComponent(path)}`);
+            if (!resp.ok) throw new Error(`Browse failed: ${resp.status}`);
+            return resp.json();
+        }
+
+        /** Map MA browse items to ArcList items with proper icons/artwork. */
+        function mapMaItem(item) {
+            // Discover section title — a non-selectable header row.
+            if (item.type === 'header') {
+                return {
+                    id: item.id || `hdr-${item.name}`,
+                    name: item.name,
+                    _maType: 'header',
+                    header: true,       // styled distinctly by script-v2/CSS
+                    actionable: false,  // GO does nothing on a header
+                };
+            }
+            const mapped = {
+                id: item.path || item.uri || item.id || item.name,
+                name: item.name,
+                _maPath: item.path,
+                _maType: item.type,
+                _maUri: item.uri,
+                _maParentUri: item.parent_uri,
+                _maRadio: item.radio,
+                _maImage: item.image,
+            };
+
+            if (item.image) {
+                mapped.image = item.image;
+            } else if (item.type === 'category') {
+                mapped.icon = item.icon || 'folder';
+                mapped.color = item.color || '#F9CA24';
+            } else {
+                mapped.icon = item.radio ? 'radio' : 'music-note';
+                mapped.color = '#74B9FF';
+            }
+            if (item.subtitle) mapped.subtitle = item.subtitle;
+            // Discover rows opt into a small cover shown left of the text
+            // (other MUSIC lists stay text-only like the original).
+            if (item.cover) mapped.cover = true;
+
+            return mapped;
+        }
+
+        /** Check if an item is a container that can be drilled into. */
+        function isContainer(item) {
+            return item._maType === 'category';
+        }
+
+        /** Send a command to the Music Assistant source service. */
+        async function sendMaCommand(command, params = {}) {
+            try {
+                await fetch(`${MA_URL}/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command, ...params }),
+                });
+            } catch (e) {
+                console.error(`[MusicAssistant] ${command} failed:`, e.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const arcList = new ArcList({
+                rootLoader: async () => {
+                    const data = await fetchBrowse('');
+                    return data.items.map(mapMaItem);
+                },
+                childrenLoader: async (item) => {
+                    if (!isContainer(item)) return null;
+                    const data = await fetchBrowse(item._maPath || '');
+                    return data.items.map(mapMaItem);
+                },
+                levels: [{
+                    isContainer,
+                }],
+                storagePrefix: 'music_assistant_arclist',
+                context: 'music_assistant',
+                webhookUrl: typeof AppConfig !== 'undefined' ? AppConfig.webhookUrl : null,
+                onGo: async (item) => {
+                    if (item._maType === 'header') {
+                        return;  // section title — not actionable
+                    }
+                    if (item._maType === 'track') {
+                        await sendMaCommand('play_item', {
+                            uri: item._maUri,
+                            parent_uri: item._maParentUri || '',
+                            name: item.name,
+                            artist: item.subtitle || '',
+                            image: item._maImage || '',
+                            radio: !!item._maRadio,
+                        });
+                    } else {
+                        // Categories -> drill in
+                        arcList.drillDown();
+                    }
+                },
+            });
+            window.arcListInstance = arcList;
+        });
+    </script>
+</body>
+</html>

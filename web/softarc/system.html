@@ -1037,7 +1037,14 @@
                     html += row('Output', rtr.output_device || '—');
 
                     // Player
-                    if (plr.player) {
+                    if (plr.player === 'music_assistant') {
+                        const conn = plr.connected ? '' : ' (disconnected)';
+                        html += row('Player', `Music Assistant ${plr.server_version || ''}${conn}`);
+                        html += row('Speaker', plr.target_name || 'not selected');
+                        if (plr.is_grouped && plr.group?.length) {
+                            html += row('Group', plr.group.join(', '));
+                        }
+                    } else if (plr.player) {
                         const info = plr.player === 'sonos'
                             ? `Sonos — ${plr.speaker_name || '?'} (${plr.speaker_ip || '?'})`
                             : plr.player;

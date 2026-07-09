@@ -33,6 +33,7 @@ SOURCE_MODULES = [
     "sources.tidal.service",
     "sources.usb.service",
     "sources.radio.service",
+    "sources.music_assistant.service",
     "sources.news",
     # sources.cd requires pyudev (Linux-only) — skipped conditionally below.
 ]
@@ -41,6 +42,7 @@ PLAYER_MODULES = [
     "players.sonos",
     "players.local",
     "players.bluesound",
+    "players.music_assistant_player",
 ]
 
 OPTIONAL_MODULES = {

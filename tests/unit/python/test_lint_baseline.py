@@ -67,6 +67,10 @@ CREATE_TASK_BASELINE: dict[str, int] = {
 }
 
 SYS_PATH_INSERT_BASELINE: dict[str, int] = {
+    # Service entry points need services/ on sys.path for lib.* imports;
+    # there's no packaging yet, so every entry point carries one insert.
+    "players/music_assistant_player.py": 1,
+    "sources/music_assistant/service.py": 1,
     "masterlink.py": 1,
     "bluetooth.py": 1,
     "router.py": 1,

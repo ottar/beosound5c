@@ -28,13 +28,14 @@ fi
 PLAYER_TYPE=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('player',{}).get('type','sonos'))" 2>/dev/null || echo "sonos")
 echo "ℹ️  Configured player type: $PLAYER_TYPE"
 
-ALL_PLAYERS=(beo-player-sonos beo-player-bluesound beo-player-local beo-player-beoplay beo-librespot)
+ALL_PLAYERS=(beo-player-sonos beo-player-bluesound beo-player-local beo-player-beoplay beo-player-music-assistant beo-librespot)
 
 case "$PLAYER_TYPE" in
     local)     WANT_PLAYERS=(beo-librespot beo-player-local) ;;
     sonos)     WANT_PLAYERS=(beo-player-sonos) ;;
     bluesound) WANT_PLAYERS=(beo-player-bluesound) ;;
     beoplay)   WANT_PLAYERS=(beo-player-beoplay) ;;
+    music_assistant) WANT_PLAYERS=(beo-player-music-assistant) ;;
     none)      WANT_PLAYERS=() ;;
     *)
         echo "⚠️  Unknown player type '$PLAYER_TYPE' — defaulting to sonos"

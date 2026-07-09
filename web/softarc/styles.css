@@ -34,8 +34,10 @@ body {
     z-index: 100; /* Above everything else */
 }
 
-/* Top-right counter display */
+/* Top-right counter display — hidden to match the original BeoSound 5,
+   which shows no item-count indicator. Remove `display:none` to restore it. */
 .counter {
+    display: none;
     position: absolute;
     top: 1rem;
     right: 1rem;
@@ -76,42 +78,53 @@ body {
     gap: 1rem; /* Space between name and image */
     transition: all 75ms ease-out; /* Smooth animations for all changes */
     pointer-events: none; /* Items are not clickable */
-    width: 280px; /* Fixed width to ensure consistent image positioning */
-    justify-content: space-between; /* Push image to the right */
+    width: 280px; /* Text truncates ~at the wheel's left edge */
+    justify-content: flex-start; /* Left-aligned: the arc is on the LEFT, text runs right toward the wheel */
 }
 
 /* Text label for ALL items - base styles */
 .item-name {
-    text-align: right; /* Align text to the right side */
+    text-align: left; /* Left edge follows the arc (original BeoSound 5) */
     flex: 1; /* Take up available space */
     min-width: 0; /* Allow text to shrink */
     padding-right: 0; /* Remove padding since gap handles spacing */
-    word-wrap: break-word;
     transition: all 75ms ease-out;
     /* Base font size and color for ALL items */
-    font-size: 0.875rem !important;
+    font-size: 0.75rem !important;
     color: white; /* Always full bright white */
     font-weight: normal;
-    /* Allow multiple lines but limit height */
-    display: -webkit-box;
-    -webkit-line-clamp: 2; /* Limit to 2 lines */
-    -webkit-box-orient: vertical;
+    /* Single line — long titles get an ellipsis instead of wrapping */
+    display: block;
+    white-space: nowrap;
     overflow: hidden;
-    white-space: pre-line; /* Preserve line breaks */
-    line-height: 1.2; /* Tighter line spacing for multiline text */
+    text-overflow: ellipsis;
+    line-height: 1.2;
 }
 
 /* Selected items - both playlists and tracks */
 .item-name.selected {
     color: white !important;
-    font-size: 1.125rem !important;
+    font-size: 1rem !important;
     font-weight: bold;
+}
+
+/* Discover section headers — a distinct label row, not a big selected title.
+   Accent colour + uppercase so they read as section dividers even when the
+   wheel lands on them. */
+.arc-item.arc-header .item-name,
+.arc-item.arc-header .item-name.selected,
+.arc-item.arc-header .item-name.unselected {
+    font-size: 1rem !important;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(102, 153, 255, 0.95) !important;
 }
 
 /* Unselected items - both playlists and tracks */
 .item-name.unselected {
     color: white !important; /* Always full bright white */
-    font-size: 0.875rem !important;
+    font-size: 1.15rem !important;
     font-weight: normal;
 }
 
@@ -153,12 +166,33 @@ body {
     background: rgba(80, 140, 255, 0.12);
 }
 
-/* Image wrapper — positions image + stack cards */
+/* Image wrapper — positions image + stack cards.
+   Hidden to match the original BeoSound 5 list modes (ARTISTS / ALBUMS /
+   TITLES are text-only there; artwork lives in the dedicated COVERS mode).
+   Remove this `display:none` to bring the per-row thumbnails back. */
 .item-image-wrap {
+    display: none;
     position: relative;
     flex-shrink: 0;
     width: 8rem;
     height: 8rem;
+}
+
+/* Discover rows: a small cover to the LEFT of the text (order:-1 puts the
+   image, which is appended after the name, before it in the flex row). */
+.arc-item.arc-cover .item-image-wrap {
+    display: block;
+    order: -1;
+    width: 2.75rem;
+    height: 2.75rem;
+}
+.arc-item.arc-cover .item-image {
+    width: 100%;
+    height: 100%;
+    border-radius: 0.35rem;
+}
+.arc-item.arc-cover .item-image.item-icon i {
+    font-size: 1.4rem;
 }
 
 .item-image-wrap .item-image {
@@ -291,6 +325,10 @@ body {
 .arc-item.breadcrumb .item-name {
     color: rgba(255, 255, 255, 0.4) !important;
     font-weight: normal;
+    /* Breadcrumbs collapse toward the LEFT (slots at x -320/-430/-500), so
+       their label must stay right-aligned — otherwise the left-aligned list
+       text runs further left and slides behind the main menu spine. */
+    text-align: right;
 }
 
 /* Breadcrumb item image styling */

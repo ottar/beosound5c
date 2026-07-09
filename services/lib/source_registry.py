@@ -27,6 +27,8 @@ DEFAULT_SOURCE_HANDLES = {
     "news": {"go", "left", "right", "up", "down"},
     "radio": {"play", "pause", "next", "prev", "stop", "go", "left", "right",
               "up", "down"} | _DIGITS,
+    "music_assistant": {"play", "pause", "next", "prev", "stop", "go", "left",
+                        "right", "up", "down"} | _DIGITS,
 }
 
 # Known source ports — used on startup to probe running sources
@@ -39,6 +41,7 @@ DEFAULT_SOURCE_PORTS = {
     "tidal": 8777,
     "plex": 8778,
     "radio": 8779,
+    "music_assistant": 8780,
     "join": 8766,
 }
 

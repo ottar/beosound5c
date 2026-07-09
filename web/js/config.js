@@ -43,6 +43,9 @@ const AppConfig = {
     // Radio source (Radio Browser)
     radioServiceUrl: 'http://localhost:8779',
 
+    // Music Assistant source
+    musicAssistantServiceUrl: 'http://localhost:8780',
+
     // Player service (Sonos/BlueSound — for direct transport commands)
     playerUrl: 'http://localhost:8766',
 

@@ -49,13 +49,13 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["sonos", "bluesound", "beoplay"],
+          "enum": ["sonos", "bluesound", "beoplay", "music_assistant"],
           "description": "Player type. Determines which player service handles playback. All player services are installed; the type guard ensures only the matching one runs."
         },
         "ip": {
           "type": "string",
           "format": "ipv4",
-          "description": "IP address of the player device (Sonos speaker, BluOS player, or B&O BeoPlay speaker)."
+          "description": "IP address of the player device (Sonos speaker, BluOS player, B&O BeoPlay speaker, or Music Assistant server)."
         }
       },
       "additionalProperties": false
@@ -127,8 +127,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["beolab5", "sonos", "bluesound", "beoplay", "powerlink", "c4amp", "hdmi", "spdif", "rca"],
-          "description": "Volume adapter type. If omitted, inferred from player.type for sonos/bluesound/beoplay, otherwise defaults to 'beolab5'.",
+          "enum": ["beolab5", "sonos", "bluesound", "beoplay", "music_assistant", "powerlink", "c4amp", "hdmi", "spdif", "rca"],
+          "description": "Volume adapter type. If omitted, inferred from player.type for sonos/bluesound/beoplay/music_assistant, otherwise defaults to 'beolab5'. music_assistant is group-aware: grouped targets get MA's proportional group volume.",
           "default": "beolab5"
         },
         "host": {
@@ -204,6 +204,18 @@
             "type": "string",
             "description": "Station UUID, or empty string to leave the slot unbound."
           }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "music_assistant": {
+      "type": "object",
+      "description": "Music Assistant integration settings (player.type=music_assistant and/or the MUSIC menu source). The auth token lives in secrets.env as MASS_TOKEN.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "MA server websocket URL (ws://host:8095/ws) or bare host. If empty, player.ip is used with the default port 8095. The MASS_WS_URL env var (secrets.env) overrides both."
         }
       },
       "additionalProperties": false

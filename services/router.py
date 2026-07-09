@@ -133,7 +133,10 @@ class EventRouter:
             items.append({"id": entry_id, "title": title, "config": entry_cfg})
 
         player_type = str(cfg("player", "type", default="")).lower()
-        if player_type == "sonos" and not any(i["id"] == "join" for i in items):
+        # Players with speaker grouping (network/join endpoints) get an
+        # auto-injected JOIN menu entry.
+        if (player_type in ("sonos", "music_assistant")
+                and not any(i["id"] == "join" for i in items)):
             join_entry = {"id": "join", "title": "JOIN", "config": {}}
             playing_idx = next((i for i, e in enumerate(items) if e["id"] == "playing"), -1)
             items.insert(playing_idx + 1, join_entry)
@@ -656,9 +659,18 @@ class EventRouter:
             await self._volume.power_on()
         await self._volume.set_volume(self._ui_to_hw(self.volume))
 
-    async def report_volume(self, volume: float):
+    async def report_volume(self, volume: float, output_name: str | None = None):
         if not self._accept_player_volume:
             return
+        # The player knows which speaker/group the wheel actually drives
+        # (e.g. the MA target after PLAY ON) — follow its name so the
+        # volume overlay labels the right output. Name changes bypass the
+        # cooldown/dedup below: they must reach the UI even when the
+        # volume value itself is unchanged.
+        name_changed = bool(output_name) and output_name != self.output_device
+        if name_changed:
+            self.output_device = output_name
+            logger.info("Volume output: %s", output_name)
         # ``volume`` arrives in hardware scale (what the player read from
         # the speaker). Convert to UI scale before comparing / storing.
         ui_volume = self._hw_to_ui(volume)
@@ -669,15 +681,22 @@ class EventRouter:
         if since < self._VOLUME_REPORT_COOLDOWN_S:
             logger.debug("Volume report ignored (%.2fs after local set): %.0f%%",
                          since, ui_volume)
+            if name_changed:
+                await self._broadcast_volume()
             return
         if round(ui_volume) == round(self.volume):
+            if name_changed:
+                await self._broadcast_volume()
             return
         self.volume = max(0, min(100, ui_volume))
         logger.info("Volume reported: %.0f%% (hw %.0f)", self.volume, volume)
         await self._broadcast_volume()
 
     async def _broadcast_volume(self):
-        await self.media.broadcast("volume_update", {"volume": round(self.volume)})
+        await self.media.broadcast("volume_update", {
+            "volume": round(self.volume),
+            "output_device": self.output_device,
+        })
 
     # ── Menu helpers ──
 
@@ -1052,7 +1071,9 @@ async def handle_volume_report(request: web.Request) -> web.Response:
     volume = data.get("volume")
     if volume is None or not isinstance(volume, (int, float)):
         return web.json_response({"error": "missing or invalid 'volume'"}, status=400)
-    await router_instance.report_volume(float(volume))
+    output_name = data.get("output_name")
+    await router_instance.report_volume(
+        float(volume), str(output_name) if output_name else None)
     return web.json_response({"status": "ok", "volume": router_instance.volume})
 
 

@@ -132,6 +132,10 @@ function processLaserEvent(data) {
     lastKnownPointerAngle = angle;
     updateViaStore(angle, pos);
 
+    // Moving the laser pointer = navigating the main menu → dismiss the
+    // speaker overlay.
+    if (window.SpeakerOverlay?.isOpen) window.SpeakerOverlay.onLaserActivity();
+
     lastLaserEvent = null;
     eventsProcessed++;
 }
@@ -163,6 +167,9 @@ function updateViaStore(angle, laserPosition) {
 
 function handleNavEvent(uiStore, data) {
     const page = uiStore.currentRoute || 'unknown';
+
+    // Speaker overlay (PLAYING/screensaver) grabs the nav wheel while open.
+    if (window.SpeakerOverlay?.isOpen && window.SpeakerOverlay.handleNav(data)) return;
 
     if (routeNavToView(page, data, uiStore)) return;
 
@@ -262,6 +269,12 @@ function handleVolumeUpdate(data) {
     const newVol = data.volume;
     if (newVol == null || typeof newVol !== 'number') return;
     currentVolume = newVol;
+    // The output label can change at runtime (MA target switch / grouping)
+    if (data.output_device && data.output_device !== volumeOutputDevice) {
+        volumeOutputDevice = data.output_device;
+        const deviceEl = document.getElementById('volume-device');
+        if (deviceEl) deviceEl.textContent = volumeOutputDevice;
+    }
     updateVolumeArc(currentVolume);
 
     // Show the arc overlay briefly (same as physical wheel)
@@ -298,6 +311,21 @@ function updateVolumeArc(volume) {
 function handleVolumeEvent(uiStore, data) {
     if (!uiStore) return;
 
+    // Speaker overlay owns the volume wheel while open: it trims the
+    // highlighted speaker's individual volume instead of the master.
+    if (window.SpeakerOverlay?.isOpen && window.SpeakerOverlay.handleVolumeEvent(data)) return;
+
+    // A view can claim the volume wheel (mirrors routeNavToView): JOIN
+    // uses it to trim the highlighted speaker's individual volume.
+    // Returning false falls through to the global master volume below.
+    const page = uiStore.currentRoute || '';
+    const viewId = page.startsWith('menu/') ? page.slice(5) : null;
+    const viewCtrl = viewId && window.SourcePresets?.[viewId]?.controller;
+    if (viewCtrl?.isActive && viewCtrl.handleVolumeEvent &&
+        viewCtrl.handleVolumeEvent(data)) {
+        return;
+    }
+
     const speed = data.speed || 10;
     const direction = data.direction === 'clock' ? 1 : -1;
 
@@ -329,6 +357,11 @@ function handleVolumeEvent(uiStore, data) {
 
 // ── Buttons ──
 
+// Double-tap GO detection (opens the speaker overlay on PLAYING). A single
+// GO is deferred this long so a second tap can cancel it.
+let goTapTimer = null;
+const GO_DOUBLE_MS = 300;
+
 // HA webhook context aliases for backwards compatibility
 const webhookContextAliases = {
     'playing': 'now_playing',
@@ -343,17 +376,53 @@ function getWebhookContext(page) {
 function handleButtonEvent(uiStore, data) {
     if (!data.button) return;
     const page = uiStore.currentRoute || 'unknown';
-    const button = data.button.toLowerCase();
+    let button = data.button.toLowerCase();
     console.log(`[BUTTON] ${button} on ${page}`);
 
     // Global overlay intercept — camera overlay captures all buttons when active
     if (window.CameraOverlayManager?.isActive &&
         window.CameraOverlayManager.handleAction(button)) return;
 
-    // Route to current view — if handled, done
-    if (routeButtonToView(page, button, uiStore)) return;
+    // While the speaker overlay is open it owns GO (join/leave) and long-GO
+    // (play here / transfer queue); other buttons are swallowed so they
+    // don't act on the view underneath.
+    if (window.SpeakerOverlay?.isOpen) {
+        if (button === 'go') { window.SpeakerOverlay.handleGo(); return; }
+        if (button === 'go_long') { window.SpeakerOverlay.handleGoLong(); return; }
+        return;
+    }
 
-    // Fallback: HA webhook (pages without local handling)
+    // Long-GO outside the overlay degrades to a normal GO (no double-tap
+    // bookkeeping — a hold is deliberate, not the first half of a tap-tap).
+    if (button === 'go_long') {
+        dispatchButton(page, 'go', uiStore);
+        return;
+    }
+
+    // Double-press GO anywhere opens the speaker overlay. A single GO still
+    // does its normal thing, deferred by GO_DOUBLE_MS so a second tap can
+    // cancel it — the price of app-wide double-tap is this small delay on
+    // every single GO.
+    if (button === 'go' && window.SpeakerOverlay) {
+        if (goTapTimer) {                       // second tap within the window
+            clearTimeout(goTapTimer);
+            goTapTimer = null;
+            window.SpeakerOverlay.open();
+            return;
+        }
+        goTapTimer = setTimeout(() => {
+            goTapTimer = null;
+            dispatchButton(page, 'go', uiStore);
+        }, GO_DOUBLE_MS);
+        return;
+    }
+
+    dispatchButton(page, button, uiStore);
+}
+
+/** Normal button dispatch: current view first, HA webhook as fallback. */
+function dispatchButton(page, button, uiStore) {
+    if (routeButtonToView(page, button, uiStore)) return;
     sendWebhook(getWebhookContext(page), button);
 }
 

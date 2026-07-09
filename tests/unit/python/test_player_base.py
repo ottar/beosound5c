@@ -297,3 +297,58 @@ class TestCommandTiming:
 
         # At minimum two stamps recorded; the last one is the post-play stamp.
         assert p._last_internal_command >= 2.0
+
+
+# ── report_volume_to_router dedup ────────────────────────────────────
+
+
+class _FakeSession:
+    """Records posts; always answers HTTP 200."""
+
+    closed = False
+
+    def __init__(self):
+        self.posts: list[tuple[str, dict]] = []
+
+    def post(self, url, json=None, timeout=None):
+        self.posts.append((url, json))
+
+        class _Ctx:
+            status = 200
+
+            async def __aenter__(self_inner):
+                return self_inner
+
+            async def __aexit__(self_inner, *a):
+                return False
+
+        return _Ctx()
+
+
+class TestReportVolumeToRouter:
+    def test_dedup_keys_on_volume_and_output_name(self):
+        """Same volume with a new output name must still send — a PLAY ON
+        target switch changes the label while the level stays put."""
+        p = _FakePlayer()
+        p._http_session = _FakeSession()
+
+        async def run():
+            await p.report_volume_to_router(40, "Beosound Stage")
+            await p.report_volume_to_router(40, "Beosound Stage")  # dup
+            await p.report_volume_to_router(40, "Bokhylle")        # name change
+            await p.report_volume_to_router(35, "Bokhylle")        # volume change
+
+        _run(run())
+        payloads = [j for _, j in p._http_session.posts]
+        assert payloads == [
+            {"volume": 40, "output_name": "Beosound Stage"},
+            {"volume": 40, "output_name": "Bokhylle"},
+            {"volume": 35, "output_name": "Bokhylle"},
+        ]
+
+    def test_report_without_name_omits_field(self):
+        p = _FakePlayer()
+        p._http_session = _FakeSession()
+
+        _run(p.report_volume_to_router(25))
+        assert p._http_session.posts[0][1] == {"volume": 25}
