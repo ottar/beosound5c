@@ -185,6 +185,10 @@ const ScreenSaver = (() => {
         el?.classList.remove('visible');
         if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
         if (weatherTimer) { clearInterval(weatherTimer); weatherTimer = null; }
+        // Re-arm so the saver returns after the next idle period — without
+        // this, a hide caused by remotely-started playback (the tick check)
+        // would end the cycle permanently: touch() only runs on input.
+        armTimer();
     }
 
     function armTimer(ms) {
