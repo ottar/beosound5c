@@ -68,6 +68,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    padding-right: 0px;
 }
 
 /* Individual item in the arc list */
@@ -78,7 +79,7 @@ body {
     gap: 1rem; /* Space between name and image */
     transition: all 75ms ease-out; /* Smooth animations for all changes */
     pointer-events: none; /* Items are not clickable */
-    width: 280px; /* Text truncates ~at the wheel's left edge */
+    width: 380px; /* Text truncates ~at the wheel's left edge */
     justify-content: flex-start; /* Left-aligned: the arc is on the LEFT, text runs right toward the wheel */
 }
 
@@ -90,7 +91,7 @@ body {
     padding-right: 0; /* Remove padding since gap handles spacing */
     transition: all 75ms ease-out;
     /* Base font size and color for ALL items */
-    font-size: 0.75rem !important;
+    font-size: 0.875rem !important;
     color: white; /* Always full bright white */
     font-weight: normal;
     /* Single line — long titles get an ellipsis instead of wrapping */
@@ -193,6 +194,12 @@ body {
 }
 .arc-item.arc-cover .item-image.item-icon i {
     font-size: 1.4rem;
+}
+/* Small cover rows: drop the "stacked deck" ghost cards — at 2.75rem the
+   diagonal offsets just look like clutter next to the name. */
+.arc-item.arc-cover .item-image-wrap.stack::before,
+.arc-item.arc-cover .item-image-wrap.stack::after {
+    display: none;
 }
 
 .item-image-wrap .item-image {

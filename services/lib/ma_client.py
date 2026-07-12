@@ -243,10 +243,17 @@ class MAClient:
             log.warning("No MASS_TOKEN set — MA commands will be rejected")
         self._connected.set()
         if self._on_connect:
-            try:
-                await self._on_connect()
-            except Exception as e:
-                log.error("on_connect callback failed: %s", e)
+            # Run the callback concurrently with the dispatch loop rather
+            # than awaiting it here: it issues commands (e.g. players/all)
+            # whose responses are only read once _dispatch_loop starts, so
+            # awaiting inline would deadlock every call until it times out.
+            self._tasks.spawn(self._run_on_connect(), name="ma_on_connect")
+
+    async def _run_on_connect(self):
+        try:
+            await self._on_connect()
+        except Exception as e:
+            log.error("on_connect callback failed: %s", e)
 
     async def _receive_json(self) -> dict:
         msg = await asyncio.wait_for(self._ws.receive(), CONNECT_TIMEOUT)

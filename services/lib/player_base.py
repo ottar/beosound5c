@@ -490,11 +490,16 @@ class PlayerBase:
                 headers=self._cors_headers())
         if action_ts:
             self._latest_action_ts = action_ts
+        # Forward the MA queue option only when present, so the five players
+        # whose play() has no `option` kwarg never receive it.
+        extra = {}
+        if "option" in data:
+            extra["option"] = data.get("option")
         ok = await self.play(
             uri=data.get("uri"), url=data.get("url"),
             track_uri=data.get("track_uri"), meta=data.get("meta"),
             radio=data.get("radio", False),
-            track_uris=data.get("track_uris"))
+            track_uris=data.get("track_uris"), **extra)
         # Re-stamp after play completes — SoCo calls can take 5+ seconds,
         # and the monitor suppression window starts from the last stamp.
         self._stamp_command()

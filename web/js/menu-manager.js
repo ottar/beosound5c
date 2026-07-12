@@ -127,7 +127,16 @@ class MenuManager {
                         await this.loadSourceScript(item.preset);
                     }
                     const preset = window.SourcePresets?.[item.preset];
-                    if (preset) {
+                    if (preset?.categories?.length) {
+                        // Source exposes its browse categories as separate
+                        // left-menu views (MA: DISCOVER/ARTISTS/ALBUMS/…), all
+                        // sharing the one preloaded iframe.
+                        for (const cat of preset.categories) {
+                            newItems.push({ title: cat.title, path: cat.path, dynamic: true });
+                            this.views[cat.path] = cat.view || preset.view;
+                            window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
+                        }
+                    } else if (preset) {
                         newItems.push({ title: item.title, path: preset.item.path, dynamic: true });
                         if (preset.view) {
                             this.views[preset.item.path] = preset.view;
@@ -186,6 +195,10 @@ class MenuManager {
                     this.preloadSourceIframe(sp.view.preloadId, sp.view.iframeSrc);
                     if (sp.item?.path) {
                         window.IframeMessenger?.registerIframe(sp.item.path, sp.view.preloadId);
+                    }
+                    // Category views (if any) share the same preloaded iframe.
+                    for (const cat of sp.categories || []) {
+                        window.IframeMessenger?.registerIframe(cat.path, sp.view.preloadId);
                     }
                 }
                 resolve();

@@ -367,7 +367,10 @@ const CFG_SOURCE_DEFS = [
     ]},
     { key: 'SCENES', label: 'Scenes', hint: 'Edit scene names, icons and HA scripts in <code>/etc/beosound5c/config.json</code> → <code>"scenes"</code> array.' },
     { key: 'SECURITY', label: 'Security Camera', isUrl: true, fields: [
-        { fid: 'url', label: 'Camera URL', path: ['_security_url'], placeholder: 'http://homeassistant.local:8123/cameras' },
+        { fid: 'url', label: 'Camera URL', path: ['_menu_url'], placeholder: 'http://homeassistant.local:8123/cameras' },
+    ]},
+    { key: 'WEATHER', label: 'Weather', isUrl: true, fields: [
+        { fid: 'url', label: 'Page URL', path: ['_menu_url'], default: 'softarc/weather.html', placeholder: 'softarc/weather.html' },
     ]},
     { key: 'SYSTEM', label: 'System', fixed: true },
     { key: 'SHOWING', label: 'Now Playing on TV', fields: [
@@ -726,9 +729,13 @@ function renderSources(cfg) {
                         </select>`;
                 }
                 let val = '';
-                if (f.path[0] === '_security_url') {
+                if (f.path[0] === '_menu_url') {
+                    // URL-type menu entries (SECURITY, WEATHER): the value
+                    // lives in menu[KEY].url, not at a config path. f.default
+                    // prefills newly-enabled entries so the toggle works
+                    // without typing the bundled page path by hand.
                     const entry = menu[src.key];
-                    val = typeof entry === 'object' ? esc(entry.url || '') : '';
+                    val = typeof entry === 'object' ? esc(entry.url || '') : esc(f.default || '');
                 } else {
                     val = esc(cfgGet(cfg, f.path) || '');
                 }
@@ -1687,7 +1694,7 @@ function buildConfig() {
             newMenu[src.key] = CFG_SOURCE_VIEWS[src.key] || kn;
         }
         (src.fields || []).forEach(f => {
-            if (f.path[0] === '_security_url') return;
+            if (f.path[0] === '_menu_url') return;
             const val = document.getElementById(`cfg-src-${kn}-${f.fid}`)?.value?.trim();
             // IR fields: always write (even blank) so "— none —" clears a previous assignment
             if (!f.isIr && !val) return;

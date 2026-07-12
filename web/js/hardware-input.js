@@ -133,8 +133,9 @@ function processLaserEvent(data) {
     updateViaStore(angle, pos);
 
     // Moving the laser pointer = navigating the main menu → dismiss the
-    // speaker overlay.
+    // speaker overlay / playing context menu.
     if (window.SpeakerOverlay?.isOpen) window.SpeakerOverlay.onLaserActivity();
+    if (window.PlayingContextMenu?.isOpen) window.PlayingContextMenu.onLaserActivity();
 
     lastLaserEvent = null;
     eventsProcessed++;
@@ -168,8 +169,10 @@ function updateViaStore(angle, laserPosition) {
 function handleNavEvent(uiStore, data) {
     const page = uiStore.currentRoute || 'unknown';
 
-    // Speaker overlay (PLAYING/screensaver) grabs the nav wheel while open.
+    // Speaker overlay / playing context menu (PLAYING/screensaver) grab the
+    // nav wheel while open.
     if (window.SpeakerOverlay?.isOpen && window.SpeakerOverlay.handleNav(data)) return;
+    if (window.PlayingContextMenu?.isOpen && window.PlayingContextMenu.handleNav(data)) return;
 
     if (routeNavToView(page, data, uiStore)) return;
 
@@ -362,6 +365,21 @@ function handleVolumeEvent(uiStore, data) {
 let goTapTimer = null;
 const GO_DOUBLE_MS = 300;
 
+// Hold-GO context menu. On a route that opted in via window.ContextMenuRoutes,
+// pressing and HOLDING GO for CONTEXT_HOLD_MS opens an action menu inside the
+// iframe; releasing executes the highlighted action. CONTEXT_HOLD_MS is below
+// input.py's GO_LONGPRESS_S (0.6s) so this timer always fires before the
+// go_long release arrives — the timer is the single source of truth for
+// "a hold happened". contextMenuRoute captures the route at open time because
+// the laser can change routes mid-hold.
+let contextHoldTimer = null;
+let contextMenuRoute = null;
+// True from the moment the PLAYING hold timer fires until the GO release is
+// handled — open() fetches async, so the release can arrive before isOpen
+// flips; this flag lets the release cancel the pending open cleanly.
+let playingMenuHold = false;
+const CONTEXT_HOLD_MS = 500;
+
 // HA webhook context aliases for backwards compatibility
 const webhookContextAliases = {
     'playing': 'now_playing',
@@ -390,6 +408,74 @@ function handleButtonEvent(uiStore, data) {
         if (button === 'go') { window.SpeakerOverlay.handleGo(); return; }
         if (button === 'go_long') { window.SpeakerOverlay.handleGoLong(); return; }
         return;
+    }
+
+    // Playing context menu open: GO release (long or short) runs the
+    // highlighted action; other buttons are swallowed like the speaker
+    // overlay so they don't leak to the view underneath.
+    if (window.PlayingContextMenu?.isOpen) {
+        if (button === 'go' || button === 'go_long') {
+            clearTimeout(contextHoldTimer);
+            contextHoldTimer = null;
+            playingMenuHold = false;
+            window.PlayingContextMenu.executeSelected();
+        }
+        return;
+    }
+
+    // GO press edge — arms the hold-GO context menu. Always consumed (never
+    // dispatched or webhooked). A no-op while an overlay owns GO.
+    if (button === 'go_down') {
+        clearTimeout(contextHoldTimer);
+        contextHoldTimer = null;
+        contextMenuRoute = null;
+        playingMenuHold = false;
+        if (window.CameraOverlayManager?.isActive || window.SpeakerOverlay?.isOpen) return;
+        if (window.ContextMenuRoutes?.has(page) &&
+            window.IframeMessenger?.routeHasIframe(page)) {
+            contextHoldTimer = setTimeout(() => {
+                contextHoldTimer = null;
+                contextMenuRoute = page;  // capture — laser can reroute mid-hold
+                window.IframeMessenger.sendButtonEvent(page, 'context_open');
+            }, CONTEXT_HOLD_MS);
+        } else if (page === 'menu/playing' && window.PlayingContextMenu) {
+            // PLAYING has no iframe — hold-GO opens the native context menu
+            // (js/playing-context-menu.js) instead. The release is consumed
+            // by the isOpen intercept above once the menu has opened; a
+            // release before the timer fires falls through to normal GO.
+            contextHoldTimer = setTimeout(() => {
+                contextHoldTimer = null;
+                playingMenuHold = true;
+                window.PlayingContextMenu.open();
+            }, CONTEXT_HOLD_MS);
+        }
+        return;
+    }
+
+    // GO release during/after a hold session. If the context menu opened (its
+    // timer fired), execute the highlighted action on the CAPTURED route and
+    // bypass the go_long downgrade + double-tap deferral below. If GO was
+    // released before the timer fired (< CONTEXT_HOLD_MS), just cancel the
+    // pending timer and fall through to normal GO handling — so quick taps and
+    // double-taps still work. Known edge: a tap immediately followed by a hold
+    // fires the deferred single-GO at GO_DOUBLE_MS before the menu opens.
+    if (button === 'go' || button === 'go_long') {
+        clearTimeout(contextHoldTimer);
+        contextHoldTimer = null;
+        if (contextMenuRoute) {
+            window.IframeMessenger?.sendButtonEvent(contextMenuRoute, 'go_release');
+            contextMenuRoute = null;
+            return;
+        }
+        // PLAYING hold fired but the menu isn't open (fetch still in flight,
+        // or it declined — nothing playing). Cancel the pending open and fall
+        // back to a plain GO, matching the arc menu's no-menu release.
+        if (playingMenuHold) {
+            playingMenuHold = false;
+            window.PlayingContextMenu?.close();
+            dispatchButton(page, 'go', uiStore);
+            return;
+        }
     }
 
     // Long-GO outside the overlay degrades to a normal GO (no double-tap

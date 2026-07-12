@@ -918,6 +918,69 @@ html, body {
   box-shadow: 0 0 0 2px rgba(102, 153, 255, 0.3);
 }
 
+/* Playing Context Menu (hold-GO on PLAYING) — visual sibling of the
+   speaker overlay: same right-side placement clear of the volume wheel. */
+#playing-context-menu {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 440px;
+  height: 768px;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 210px 250px 24px;
+  box-sizing: border-box;
+  background: linear-gradient(to left, rgba(0,0,0,1) 55%, rgba(0,0,0,0.9));
+  border-left: #999 2px solid;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(12px);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+#playing-context-menu.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+#playing-context-menu .pcm-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(102, 153, 255, 0.95);
+  text-align: left;
+  margin-bottom: 16px;
+}
+#playing-context-menu .pcm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#playing-context-menu .pcm-row {
+  font-size: 1.45rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 6px 12px 6px 0;
+  border-right: 3px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 120ms ease-out, border-color 120ms ease-out;
+}
+#playing-context-menu .pcm-row.selected {
+  border-right-color: rgba(102, 153, 255, 1);
+  color: #fff;
+}
+#playing-context-menu .pcm-help {
+  margin-top: 22px;
+  font-size: 0.68rem;
+  line-height: 1.9;
+  letter-spacing: 0.08em;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.3);
+}
+
 /* Volume Overlay */
 #volume-overlay {
   position: fixed;

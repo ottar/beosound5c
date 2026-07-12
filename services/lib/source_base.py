@@ -303,7 +303,8 @@ class SourceBase:
             return None
 
     async def player_play(self, uri=None, url=None, track_uri=None, meta=None,
-                          radio=False, track_uris=None, action_ts=None) -> bool:
+                          radio=False, track_uris=None, action_ts=None,
+                          option=None) -> bool:
         """Ask the player service to play a URI or URL.
         track_uri: Spotify track URI to start at within a playlist/album.
         meta: optional dict with display metadata (title, artist, album,
@@ -311,7 +312,9 @@ class SourceBase:
         radio: if True, treat URL as a continuous radio stream (Sonos uses
                x-rincon-mp3radio:// scheme instead of plain HTTP).
         track_uris: list of spotify:track:xxx URIs to queue individually
-                    (used for Liked Songs and other non-playlist collections)."""
+                    (used for Liked Songs and other non-playlist collections).
+        option: MA queue option (play|next|add|replace) for enqueue variants;
+                players that don't understand it ignore it."""
         body = {}
         if uri:
             body["uri"] = uri
@@ -325,6 +328,8 @@ class SourceBase:
             body["radio"] = True
         if track_uris:
             body["track_uris"] = track_uris
+        if option:
+            body["option"] = option
         # Carry this source's authority timestamp so the player can reject
         # stale play commands from sources that were superseded by a newer
         # activation.  _action_ts is kept in sync by player_next/prev/resume.

@@ -6,10 +6,11 @@ Controls playback on a Music Assistant server (ws://<host>:8095/ws) via
 the shared MAClient (services/lib/ma_client.py). The MA *target player*
 (which speaker/queue this BS5c drives) is chosen at runtime from the UI
 — never auto-ranked; the last selection persists across restarts in
-/etc/beosound5c/music_assistant_state.json. On startup the persisted
-target is used if it is still available; with exactly one available MA
-player that one is picked; otherwise no target is set until the user
-selects one in the JOIN/speakers view.
+/etc/beosound5c/music_assistant_state.json. On startup a speaker that is
+actively playing wins (so a restart re-attaches to live playback); else
+the persisted target is used if still available; else, with exactly one
+available MA player, that one is picked; otherwise no target is set until
+the user selects one in the JOIN/speakers view.
 
 Speaker grouping uses MA's native group commands (players/cmd/group /
 ungroup) and is exposed through the same /player/network + /player/join
@@ -114,9 +115,28 @@ class MusicAssistantPlayer(PlayerBase):
         return p.get("display_name") or p.get("name") or player_id
 
     def _restore_target(self):
-        """Pick the target: persisted id → sole available player → none."""
+        """Pick the target: currently-playing player → persisted id →
+        sole available player → none.
+
+        A live playback wins over the stored id so a service/UI restart
+        re-attaches to whatever speaker is actually playing instead of a
+        stale target — otherwise, with several MA players available, the
+        wheel/buttons stay pointed at the last selection and the user has
+        to reselect in the speakers view to regain control. If the stored
+        target is itself the playing one it's kept (no needless hop when
+        multiple speakers play independently)."""
         stored = self._state_store.load() or {}
         stored_id = stored.get("player_id")
+
+        playing = [p for p in self._available_players()
+                   if p.get("playback_state") == "playing"]
+        if playing:
+            if stored_id and any(p["player_id"] == stored_id for p in playing):
+                self._set_target(stored_id, persist=False)
+            else:
+                self._set_target(playing[0]["player_id"])
+            return
+
         if stored_id and (self._players.get(stored_id) or {}).get("available"):
             self._set_target(stored_id, persist=False)
             return
@@ -131,15 +151,17 @@ class MusicAssistantPlayer(PlayerBase):
     # ── PlayerBase abstract methods ──
 
     async def play(self, uri=None, url=None, track_uri=None, meta=None,
-                   radio=False, track_uris=None) -> bool:
+                   radio=False, track_uris=None, option=None) -> bool:
         if not self._target_id:
             logger.error("Play rejected: no MA target player selected")
             return False
         media = track_uris or uri or url
         if not media:
             return await self.resume()
-        args = {"queue_id": self._target_id, "media": media,
-                "option": "replace"}
+        # option chooses how the queue is affected: play/next/add enqueue
+        # variants vs replace (default). Anything unexpected → replace.
+        opt = option if option in ("play", "next", "add", "replace") else "replace"
+        args = {"queue_id": self._target_id, "media": media, "option": opt}
         if radio:
             args["radio_mode"] = True
         if track_uri:
@@ -283,6 +305,35 @@ class MusicAssistantPlayer(PlayerBase):
             logger.error("play_from_queue failed: %s", e)
             return False
 
+    async def play_track_radio(self, track_uri) -> bool:
+        """Start MA's dynamic radio mode seeded by *track_uri* — replaces
+        the queue with an endless similar-tracks stream."""
+        if not self._target_id or not track_uri:
+            return False
+        try:
+            await self._client.call("player_queues/play_media",
+                                    queue_id=self._target_id,
+                                    media=track_uri, radio_mode=True)
+            return True
+        except MAClientError as e:
+            logger.error("play_track_radio failed: %s", e)
+            return False
+
+    async def get_shuffle(self) -> bool | None:
+        """Current queue shuffle state, or None when unknown (no target /
+        disconnected / call failed) — the UI hides the toggle then."""
+        if not self._target_id or not self._client.connected:
+            return None
+        try:
+            queue = await self._client.call("player_queues/get",
+                                            queue_id=self._target_id)
+        except MAClientError as e:
+            logger.warning("shuffle state fetch failed: %s", e)
+            return None
+        if not queue:
+            return None
+        return bool(queue.get("shuffle_enabled"))
+
     # ── Status ──
 
     async def get_status(self) -> dict:
@@ -297,6 +348,7 @@ class MusicAssistantPlayer(PlayerBase):
             "server_version": (self._client.server_info.get("server_version")
                                if self._client else None),
             "state": self._current_playback_state or "stopped",
+            "shuffle": await self.get_shuffle(),
             "volume": self._master_volume(),
             "target_id": self._target_id,
             "target_name": (self._player_name(self._target_id)

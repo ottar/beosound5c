@@ -176,6 +176,12 @@ class ViewManager {
             }
         }
 
+        // Per-view onShow hook (e.g. MA category views tell the shared iframe
+        // which library section to display).
+        if (view.onShow) {
+            try { view.onShow(); } catch (e) { console.warn('view.onShow failed', e); }
+        }
+
         // Fade content back in
         const isOverlayView = this.currentRoute === 'menu/playing' || this.currentRoute === 'menu/showing';
         if (isOverlayView) {

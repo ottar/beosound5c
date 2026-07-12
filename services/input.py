@@ -93,7 +93,8 @@ POWER_LONGPRESS_ALL_STANDBY = 5.0
 # reliable. Classified by hold time: short -> 'go', held >= GO_LONGPRESS_S
 # -> 'go_long' (selects/plays-on the highlighted speaker in the speaker
 # overlay). The double-tap that OPENS the overlay is detected in
-# hardware-input.js.
+# hardware-input.js. A separate 'go_down' event fires on the press edge so
+# the hold-GO context menu can open mid-hold (release stays classified).
 go_button_state = 0         # 0 = released, 1 = pressed
 go_button_pressed_at = 0.0  # wall time of the current GO press
 GO_LONGPRESS_S = 0.6
@@ -1686,6 +1687,10 @@ def parse_report(rep: list, loop=None):
         if go_button_state == 0:
             go_button_state = 1
             go_button_pressed_at = time.time()
+            # Additive press-edge event: the hold-GO context menu needs to know
+            # when GO goes down (the release classification below is unchanged,
+            # so double-tap / speaker-overlay semantics survive).
+            btn_evt = {'button': 'go_down'}
     elif go_button_state == 1:
         go_button_state = 0
         held = time.time() - go_button_pressed_at if go_button_pressed_at else 0.0

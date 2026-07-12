@@ -33,6 +33,12 @@ class ArcList {
             webhookUrl: config.webhookUrl || (typeof AppConfig !== 'undefined' ? AppConfig.webhookUrl : 'http://localhost:8767/forward'),
             webSocketUrl: config.webSocketUrl || (typeof AppConfig !== 'undefined' ? AppConfig.websocket.input : 'ws://localhost:8765'),
             onGo: config.onGo || null,
+            // Hold-GO context menu (optional). contextMenuBuilder(item, depth,
+            // pathContext) returns an array of final-shape action items
+            // ({id,name,icon,color,run}) or null to decline. onContextAction
+            // (optional) runs the chosen action; otherwise action.run is used.
+            contextMenuBuilder: config.contextMenuBuilder || null,
+            onContextAction: config.onContextAction || null,
         };
 
         // ===== ARC POSITIONING (from centralized Constants.softarc) =====
@@ -68,6 +74,7 @@ class ArcList {
         this.snapTimer = null;
         this._inPageView = false;
         this._pageScrollEl = null;
+        this._contextMenuOpen = false;
 
         // ===== DOM =====
         this.container = document.getElementById('arc-container');
@@ -166,6 +173,7 @@ class ArcList {
     }
 
     async reloadData() {
+        this._contextMenuOpen = false;
         if (this.depth !== 0) {
             console.log('[RELOAD] Skipped — currently at depth', this.depth);
             return;
@@ -193,6 +201,34 @@ class ArcList {
         console.log('[RELOAD] Data refreshed');
     }
 
+    /** Reset to depth 0 and reload the root list via rootLoader. Clears any
+     *  drill state, breadcrumbs and hierarchy background. Used when an
+     *  external caller swaps the root section (e.g. picking a MUSIC view from
+     *  the left menu) — unlike reloadData(), it works from any depth. */
+    async jumpToRoot() {
+        this._abortAnimation();
+        if (this.snapTimer) { clearTimeout(this.snapTimer); this.snapTimer = null; }
+        this.navStack = [];
+        this.depth = 0;
+        this._inPageView = false;
+        this._pageScrollEl = null;
+        this._contextMenuOpen = false;
+        this.currentIndex = 0;
+        this.targetIndex = 0;
+        this.container
+            .querySelectorAll('.arc-item.breadcrumb, .arc-item.parent-hidden, .page-view')
+            .forEach(el => el.remove());
+        const bg = document.getElementById('hierarchy-background');
+        if (bg) { bg.classList.remove('active'); bg.style.opacity = 0; }
+        await this.loadData();
+        this.currentIndex = 0;
+        this.targetIndex = 0;
+        this.totalItemsDisplay.textContent = this.items.length;
+        this.updateCounter();
+        this.render();
+        this.saveState();
+    }
+
     // ─── STATE PERSISTENCE ───────────────────────────────────────────
 
     get STORAGE_KEY() { return `${this.config.storagePrefix}_nav_state`; }
@@ -208,6 +244,15 @@ class ArcList {
                 const pageFrame = stackFrames[stackFrames.length - 1];
                 depth = this.depth - 1;
                 currentIndex = pageFrame ? pageFrame.selectedIndex : 0;
+                stackFrames = stackFrames.slice(0, -1);
+            } else if (this._contextMenuOpen) {
+                // The context menu is a transient overlay, not a browse level —
+                // persist as the origin level scrolled to the acted-on item, so
+                // a reload (saveState runs every 1s) restores the list, never
+                // tries to rebuild the menu through childrenLoader.
+                const menuFrame = stackFrames[stackFrames.length - 1];
+                depth = this.depth - 1;
+                currentIndex = menuFrame ? menuFrame.selectedIndex : 0;
                 stackFrames = stackFrames.slice(0, -1);
             }
 
@@ -478,6 +523,143 @@ class ArcList {
             this._animationAbort = null;
             this._resumeAnimation();
         }
+    }
+
+    // ─── CONTEXT MENU (hold-GO) ─────────────────────────────────────
+
+    /** Open the hold-GO action menu for the highlighted item. Pushes a nav
+     *  frame like drillDown (so the acted-on item slides into breadcrumb slot 0
+     *  and the list is restored on close) but replaces the arc with the action
+     *  list built by config.contextMenuBuilder. Declines silently when there's
+     *  no builder, an animation is running, we're in a page view, the menu is
+     *  already open, or the builder returns no actions (e.g. on a header). */
+    async openContextMenu() {
+        if (!this.config.contextMenuBuilder) return;
+        if (this.isAnimating || this._inPageView || this._contextMenuOpen) return;
+
+        this.snapToNearest();
+        const idx = Math.round(this.currentIndex);
+        const item = this.items[idx];
+        if (!item) return;
+
+        let actions;
+        try {
+            const pathContext = this.navStack.map(f => f.selectedItem);
+            actions = this.config.contextMenuBuilder(item, this.depth, pathContext);
+        } catch (e) {
+            console.error('contextMenuBuilder failed:', e);
+            return;
+        }
+        if (!actions || actions.length === 0) return;  // nothing actionable
+
+        // Interrupt any running animation (mirror drillDown)
+        this._abortAnimation();
+        this._pauseAnimation();
+        this._animationAbort = new AbortController();
+        this.isAnimating = true;
+        this._contextMenuOpen = true;
+
+        try {
+            const selectedElement = document.querySelector('.arc-item.selected:not(.breadcrumb)');
+            const frame = {
+                items: this.items,
+                rawItems: this._getCurrentRawItems(),
+                selectedIndex: idx,
+                selectedItem: item,
+                breadcrumbElement: null,
+                isContextMenu: true,
+            };
+            this.navStack.push(frame);
+
+            this.depth++;
+            // Actions are already final-shape ({id,name,icon,color,run}); do
+            // NOT run them through mapItems.
+            this.items = actions;
+            this.currentIndex = 0;   // Cancel (index 0) highlighted initially
+            this.targetIndex = 0;
+
+            await this._animateForward(frame, selectedElement);
+
+            this.isAnimating = false;
+            this.render();
+            this.updateCounter();
+            this.totalItemsDisplay.textContent = this.items.length;
+        } catch (e) {
+            console.error('Error in openContextMenu:', e);
+        } finally {
+            this.isAnimating = false;
+            this._animationAbort = null;
+            this._resumeAnimation();
+        }
+    }
+
+    /** Close the menu, restoring the browse list at the same highlight. */
+    closeContextMenu() {
+        if (!this._contextMenuOpen) return;
+        this._contextMenuOpen = false;
+        return this.goBack();
+    }
+
+    /** GO released — run the highlighted action (or fall back to a plain GO
+     *  when no menu is open, matching today's go_long→go = play). Cancel or an
+     *  empty slot just closes. A navigation action turns the menu into a browse
+     *  level via replaceContextMenuLevel() (which clears _contextMenuOpen), so
+     *  it must NOT be closed with goBack afterwards. */
+    async executeContextRelease() {
+        if (!this._contextMenuOpen) {
+            this.handleGo();
+            return;
+        }
+        this.snapToNearest();
+        const idx = Math.round(this.currentIndex);
+        const action = this.items[idx];
+        const frame = this.navStack[this.navStack.length - 1];
+        const actedItem = frame ? frame.selectedItem : null;
+
+        if (!action || action.id === 'cancel') {
+            this.closeContextMenu();
+            return;
+        }
+
+        const el = this.container.querySelector('.arc-item.selected');
+        if (el) {
+            el.classList.add('go-flash');
+            setTimeout(() => el.classList.remove('go-flash'), 400);
+        }
+
+        try {
+            if (this.config.onContextAction) {
+                await this.config.onContextAction(action, actedItem, this);
+            } else if (typeof action.run === 'function') {
+                await action.run(actedItem, this);
+            }
+        } catch (e) {
+            console.error('Context action failed:', e);
+        }
+
+        // Still open ⇒ a terminal action (play/favorite/…) ran; close it. If a
+        // navigation action already replaced the level, _contextMenuOpen is
+        // false and we leave the new browse level in place.
+        if (this._contextMenuOpen) this.closeContextMenu();
+    }
+
+    /** Turn the open menu into a normal browse level (Go to artist/album):
+     *  keep the nav frame (breadcrumb + return highlight) but swap the arc from
+     *  actions to real children. Further drilling and › back to the origin work
+     *  like any level. rawChildren are pre-mapped (mapMaItem), like loader
+     *  results — mapItems (default passthrough) is applied for consistency. */
+    replaceContextMenuLevel(rawChildren) {
+        if (!this._contextMenuOpen) return;
+        this._contextMenuOpen = false;
+        const frame = this.navStack[this.navStack.length - 1];
+        if (frame) frame.loadedChildren = rawChildren;
+        this.items = this.mapItems(rawChildren || [], this.depth);
+        this.currentIndex = 0;
+        this.targetIndex = 0;
+        this.totalItemsDisplay.textContent = this.items.length;
+        this.render();
+        this.updateCounter();
+        this.saveState();
     }
 
     // ─── PAGE VIEW ──────────────────────────────────────────────────
@@ -835,6 +1017,18 @@ class ArcList {
     // ─── BUTTON ROUTING ──────────────────────────────────────────────
 
     handleButton(button) {
+        // Hold-GO context menu control messages (from the parent page).
+        if (button === 'context_open') { this.openContextMenu(); return; }
+        if (button === 'go_release') { this.executeContextRelease(); return; }
+
+        // While the menu owns the arc, the nav wheel scrolls the actions
+        // (handleNavFromParent, unchanged); › closes it, ‹ and a plain GO are
+        // ignored (release is what executes an action).
+        if (this._contextMenuOpen) {
+            if (button === 'right') this.closeContextMenu();
+            return;
+        }
+
         if (button === 'left') {
             if (this._inPageView) return;
             if (this.canDrillDown()) {
@@ -1090,46 +1284,66 @@ class ArcList {
         // Try to update existing elements in-place (fast path)
         if (this._updateExistingElements()) return;
 
-        // Full render: remove non-breadcrumb items
-        Array.from(this.container.children).forEach(child => {
-            if (!child.classList.contains('breadcrumb')) child.remove();
-        });
-
-        const level = this.getLevelDescriptor(this.depth);
         const visibleItems = this.getVisibleItems();
 
+        // Reconcile by item id instead of rebuilding: a wheel scroll shifts
+        // the visible window one slot per frame, so most rows survive from
+        // the previous render — move their DOM nodes and skip their content.
+        // The old tear-down-and-recreate path made a fresh <img> per row per
+        // frame (decode + GPU texture upload); on the Pi a fast scroll
+        // exhausted Chromium's GPU command buffer and crashed the renderer.
+        // dataset.sig guards the reuse: fallback ids (`item-${index}`) can
+        // collide across levels, so content is rebuilt whenever it differs.
+        const existing = new Map();
+        Array.from(this.container.querySelectorAll('.arc-item:not(.breadcrumb)'))
+            .forEach(el => existing.set(el.dataset.itemId, el));
+        const used = new Set();
+
         visibleItems.forEach(item => {
-            const el = document.createElement('div');
-            el.className = 'arc-item';
-            el.dataset.itemId = item.id;
-
             const isSelected = Math.abs(item.index - this.currentIndex) < 0.5;
-            if (isSelected) el.classList.add('selected');
+            // Container/page detection (stack effect for drill-down-able items)
+            const navigatable = this.isContainer(item) || this.isPage(item);
+            const sig = `${item.name}|${item.image || ''}|${item.icon || ''}|${navigatable}`;
 
+            let el = existing.get(item.id);
+            if (el && used.has(el)) el = null;   // duplicate id in this frame
+            if (!el) {
+                el = document.createElement('div');
+                el.dataset.itemId = item.id;
+            }
+            used.add(el);
+
+            el.className = 'arc-item';
+            if (isSelected) el.classList.add('selected');
             // Section header row (e.g. Discover list titles) — styled distinctly
             if (item.header) el.classList.add('arc-header');
             // Row with a small cover left of the text (Discover items)
             if (item.cover) el.classList.add('arc-cover');
             // Actionable detection (blue highlight on GO-able items)
             if (this.isActionable(item)) el.classList.add('actionable');
-            // Container/page detection (stack effect for drill-down-able items)
-            const navigatable = this.isContainer(item) || this.isPage(item);
             if (navigatable) el.classList.add('navigatable');
 
-            const nameEl = document.createElement('div');
+            if (el.dataset.sig !== sig) {
+                el.dataset.sig = sig;
+                el.textContent = '';
+                const nameEl = document.createElement('div');
+                nameEl.textContent = item.name;
+                el.appendChild(nameEl);
+                el.appendChild(this.createImageWrapper(item, navigatable));
+            }
+            const nameEl = el.firstChild;
             nameEl.className = `item-name ${isSelected ? 'selected' : 'unselected'}`;
-            nameEl.textContent = item.name;
-
-            const imgWrap = this.createImageWrapper(item, navigatable);
 
             el.style.transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale})`;
             el.style.setProperty('opacity', '1', 'important');
             el.style.setProperty('filter', 'none', 'important');
 
-            el.appendChild(nameEl);
-            el.appendChild(imgWrap);
+            // appendChild both inserts new rows and moves reused ones into
+            // paint order (moving a node does not reload its <img>).
             this.container.appendChild(el);
         });
+
+        existing.forEach(el => { if (!used.has(el)) el.remove(); });
 
         this.updateCounter();
     }

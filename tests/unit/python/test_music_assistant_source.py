@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from lib.ma_client import MAClientError
 from sources.music_assistant.service import MusicAssistantSource
 
 
@@ -19,14 +20,15 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def _media_item(item_id, name, media_type, artists=None, image_path=None):
+def _media_item(item_id, name, media_type, artists=None, image_path=None,
+                provider="library"):
     item = {
         "item_id": str(item_id),
-        "provider": "library",
+        "provider": provider,
         "name": name,
         "sort_name": name.lower(),
         "media_type": media_type,
-        "uri": f"library://{media_type}/{item_id}",
+        "uri": f"{provider}://{media_type}/{item_id}",
         "metadata": {},
     }
     if artists:
@@ -143,6 +145,29 @@ def test_browse_artists_lists_containers(source):
     assert first["image"].startswith("http://10.0.0.10:8095/imageproxy?")
     _, args = source._client.calls[0]
     assert args["limit"] == 500
+    # Album artists only — guest/track artists stay out of the arc list
+    assert args["album_artists_only"] is True
+
+
+def test_library_pages_through_full_library(source):
+    # 1137 artists = pages of 500 + 500 + 137; a single page used to
+    # truncate the list around "D" on large libraries.
+    all_items = [_media_item(i, f"Artist {i:04d}", "artist")
+                 for i in range(1137)]
+
+    async def paged_call(command, **args):
+        source._client.calls.append((command, args))
+        if command == "music/artists/library_items":
+            off = args.get("offset", 0)
+            return all_items[off:off + args.get("limit", 500)]
+        return []
+
+    source._client.call = paged_call
+    result = _run(source._browse("artists"))
+    assert len(result["items"]) == 1137
+    offsets = [a["offset"] for c, a in source._client.calls
+               if c == "music/artists/library_items"]
+    assert offsets == [0, 500, 1000]
 
 
 def test_browse_artist_albums(source):
@@ -200,9 +225,13 @@ def test_play_item_standalone_track(source):
 
 
 def test_play_item_radio(source):
+    # A radio station plays its stream directly — never radio_mode=True, which
+    # MA refuses for a Radio MediaItem ("Dynamic tracks not supported").
     _run(source.handle_command("play_item", {"uri": "library://radio/5",
                                              "name": "NRK P1", "radio": True}))
-    assert source.player_play.await_args.kwargs["radio"] is True
+    kwargs = source.player_play.await_args.kwargs
+    assert kwargs["radio"] is False
+    assert kwargs["uri"] == "library://radio/5"
 
 
 def test_play_item_failure_rolls_back(source):
@@ -238,3 +267,157 @@ def test_transport_commands(source):
     source.player_prev.assert_awaited_once()
     source.player_stop.assert_awaited_once()
     source.register.assert_any_await("available")
+
+
+# ── Context-menu metadata on serialized rows ──
+
+def test_container_item_carries_context_fields(source):
+    source._client.responses["music/artists/library_items"] = [
+        _media_item(1, "ABBA", "artist"),
+    ]
+    it = _run(source._browse("artists"))["items"][0]
+    assert it["media_type"] == "artist"
+    assert it["provider"] == "library"
+    assert it["in_library"] is True
+    assert it["favorite"] is False
+
+
+def test_discover_apple_music_item_not_in_library(source):
+    """A Discover item from a non-library provider serializes with
+    in_library:false so the context menu offers 'Add to library'."""
+    item = _media_item(1, "Song", "track", artists=["A"], provider="apple_music")
+    source._client.responses["music/recommendations"] = [
+        {"item_id": "rp", "name": "RP", "items": [item]}]
+    track = _run(source._browse("discover"))["items"][1]
+    assert track["provider"] == "apple_music"
+    assert track["in_library"] is False
+    assert track["media_type"] == "track"
+
+
+def test_track_item_carries_artist_and_album_uri(source):
+    album_track = {
+        "item_id": "100", "provider": "library", "name": "Waterloo",
+        "sort_name": "waterloo", "media_type": "track",
+        "uri": "library://track/100", "metadata": {},
+        "artists": [{"name": "ABBA", "uri": "library://artist/1"}],
+        "album": {"name": "Waterloo", "uri": "library://album/10"},
+    }
+    source._client.responses["music/albums/album_tracks"] = [album_track]
+    it = _run(source._browse("albums/10"))["items"][0]
+    assert it["artist_uri"] == "library://artist/1"
+    assert it["album_uri"] == "library://album/10"
+
+
+# ── URI browse (Go to artist/album, non-library providers) ──
+
+def test_browse_uri_album_uses_item_provider(source):
+    source._client.responses["music/albums/album_tracks"] = [
+        _media_item(100, "Track", "track", artists=["A"], provider="apple_music"),
+    ]
+    result = _run(source._browse("uri/apple_music://album/xyz"))
+    cmd, args = source._client.calls[0]
+    assert cmd == "music/albums/album_tracks"
+    assert args == {"item_id": "xyz",
+                    "provider_instance_id_or_domain": "apple_music"}
+    # tracks carry the album URI as parent so "Play from here" works
+    assert result["items"][0]["parent_uri"] == "apple_music://album/xyz"
+
+
+def test_browse_uri_artist_lists_albums_with_uri_paths(source):
+    source._client.responses["music/artists/artist_albums"] = [
+        _media_item(5, "Alb", "album", provider="apple_music"),
+    ]
+    result = _run(source._browse("uri/apple_music://artist/9"))
+    cmd, args = source._client.calls[0]
+    assert cmd == "music/artists/artist_albums"
+    assert args == {"item_id": "9",
+                    "provider_instance_id_or_domain": "apple_music"}
+    # children keep uri/ paths so further drilling continues
+    assert result["items"][0]["path"] == "uri/apple_music://album/5"
+
+
+# ── play_item queue options ──
+
+def test_play_item_next_enqueues_bare_uri_no_broadcast(source):
+    res = _run(source.handle_command("play_item", {
+        "uri": "library://track/100", "parent_uri": "library://album/10",
+        "name": "T", "option": "next"}))
+    assert res["status"] == "ok"
+    kwargs = source.player_play.await_args.kwargs
+    assert kwargs["uri"] == "library://track/100"  # bare, ignores parent
+    assert kwargs["option"] == "next"
+    assert kwargs.get("track_uri") is None
+    # nothing starts playing → no PLAYING pre-broadcast
+    source.register.assert_not_awaited()
+    source.post_media_update.assert_not_awaited()
+
+
+def test_play_item_add_enqueues(source):
+    _run(source.handle_command("play_item", {
+        "uri": "library://album/10", "name": "Alb", "option": "add"}))
+    assert source.player_play.await_args.kwargs["option"] == "add"
+    source.register.assert_not_awaited()
+
+
+def test_play_item_play_now_broadcasts_and_bare_uri(source):
+    _run(source.handle_command("play_item", {
+        "uri": "library://track/100", "parent_uri": "library://album/10",
+        "name": "T", "option": "play"}))
+    kwargs = source.player_play.await_args.kwargs
+    assert kwargs["uri"] == "library://track/100"  # bare, ignores parent
+    assert kwargs["track_uri"] is None
+    assert kwargs["option"] == "play"
+    source.register.assert_any_await("playing", auto_power=True)
+
+
+def test_play_item_radio_mode_sets_radio_no_expansion(source):
+    res = _run(source.handle_command("play_item", {
+        "uri": "library://artist/9", "name": "Artist", "radio_mode": True}))
+    assert res["status"] == "ok"
+    kwargs = source.player_play.await_args.kwargs
+    assert kwargs["radio"] is True
+    assert kwargs["uri"] == "library://artist/9"
+    # MA builds the dynamic queue itself → no artist_tracks expansion
+    assert source._client.calls == []
+    source.register.assert_any_await("playing", auto_power=True)
+
+
+def test_play_item_replace_still_expands_artist(source):
+    """Default (replace) path keeps the artist-track expansion — the classic
+    'Play from here' behaviour is unchanged."""
+    source._client.responses["music/artists/artist_tracks"] = [
+        _media_item(1, "t1", "track"), _media_item(2, "t2", "track")]
+    _run(source.handle_command("play_item", {
+        "uri": "library://artist/9", "name": "Artist"}))
+    kwargs = source.player_play.await_args.kwargs
+    assert kwargs["track_uris"] == ["library://track/1", "library://track/2"]
+
+
+# ── favorites / library commands ──
+
+def test_favorite_add_uses_uri(source):
+    res = _run(source.handle_command("favorite", {
+        "uri": "library://track/1", "media_type": "track",
+        "item_id": "1", "add": True}))
+    assert res["status"] == "ok"
+    cmd, args = source._client.calls[0]
+    assert cmd == "music/favorites/add_item"
+    assert args == {"item": "library://track/1"}
+
+
+def test_library_remove_uses_item_id(source):
+    _run(source.handle_command("library", {
+        "uri": "library://album/2", "media_type": "album",
+        "item_id": "2", "add": False}))
+    cmd, args = source._client.calls[0]
+    assert cmd == "music/library/remove_item"
+    assert args == {"media_type": "album", "library_item_id": "2"}
+
+
+def test_favorite_error_returns_status(source):
+    async def boom(command, **a):
+        raise MAClientError("nope")
+    source._client.call = boom
+    res = _run(source.handle_command("favorite", {
+        "uri": "library://track/1", "add": True}))
+    assert res["status"] == "error"

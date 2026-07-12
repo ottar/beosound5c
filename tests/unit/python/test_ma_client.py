@@ -206,9 +206,11 @@ def test_events_dispatch_to_callback():
 def test_on_connect_and_disconnect_callbacks():
     async def scenario():
         calls = []
+        connected = asyncio.Event()
 
         async def on_connect():
             calls.append("connect")
+            connected.set()
 
         async def on_disconnect():
             calls.append("disconnect")
@@ -218,9 +220,42 @@ def test_on_connect_and_disconnect_callbacks():
                          on_disconnect=on_disconnect)
         await client.start()
         assert await client.wait_connected(2)
+        # on_connect runs concurrently with the dispatch loop now, so wait
+        # for it rather than assuming it finished before wait_connected.
+        await asyncio.wait_for(connected.wait(), 2)
         assert calls == ["connect"]
         await client.close()
         assert calls == ["connect", "disconnect"]
+    _run(scenario())
+
+
+def test_on_connect_callback_can_issue_calls():
+    """Regression: an on_connect that awaits a command must not deadlock.
+
+    The callback's call() response is only read once the dispatch loop is
+    running; awaiting the callback inline in _connect_once used to block
+    every such call until it timed out (30s), so player restore never ran.
+    """
+    async def scenario():
+        result = {}
+
+        ws = FakeWS(responder=lambda p: (
+            [{"message_id": p["message_id"], "result": [{"player_id": "p1"}]}]
+            if p.get("command") == "players/all" else []))
+
+        async def on_connect():
+            result["players"] = await client.call("players/all", timeout=2)
+
+        client = _client(ws, on_connect=on_connect)
+        await client.start()
+        assert await client.wait_connected(2)
+        # If the deadlock regressed this would sit until the 2s call timeout.
+        for _ in range(50):
+            if "players" in result:
+                break
+            await asyncio.sleep(0.02)
+        assert result.get("players") == [{"player_id": "p1"}]
+        await client.close()
     _run(scenario())
 
 

@@ -15,6 +15,7 @@
     "RADIO": "radio",
     "SCENES": "scenes",
     "SECURITY": { "url": "softarc/security.html" },
+    "WEATHER": { "url": "softarc/weather.html" },
     "SYSTEM": "system",
     "SHOWING": "showing"
   },
@@ -41,6 +42,7 @@
     "output_name": "Sonos"
   },
   "cd": { "device": "/dev/sr0" },
+  "weather": { "name": "Bergen", "lat": 60.393, "lon": 5.3242, "altitude": 12 },
   "join": { "overlay_timeout": 15 },
   "music_assistant": { "url": "" },
   "spotify": { "client_id": "" },

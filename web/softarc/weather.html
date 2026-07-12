@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather - BeoSound 5c</title>
+    <link rel="stylesheet" href="../assets/phosphor/phosphor.css">
+    <link rel="stylesheet" href="../assets/phosphor/phosphor-fill.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow-x: hidden;   /* only the invisible spacer scrolls (vertically) */
+        }
+
+        /* All visible UI is fixed; the parent pans the meteogram by scrolling
+           the window vertically (hardware-input.js does scrollBy(0, ±120) on
+           webpage iframes) and #spacer provides the scroll range. */
+        #spacer { width: 1px; }
+
+        #ui {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            display: flex;
+            align-items: baseline;
+            gap: 18px;
+            padding: 22px 36px 8px;
+        }
+        header .place {
+            font-size: 30px;
+            font-weight: 600;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        header .now-temp { font-size: 30px; font-weight: 300; }
+        header .now-temp.warm { color: #ff5b45; }
+        header .now-temp.cold { color: #4da3ff; }
+        header .now-sym { font-size: 28px; align-self: center; }
+        header .updated {
+            margin-left: auto;
+            font-size: 12px;
+            color: #666;
+        }
+
+        #status {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #888;
+            letter-spacing: 1px;
+        }
+
+        /* Meteogram: fixed temperature axis on the left, mm axis on the right,
+           a horizontally scrolling strip between them. */
+        #meteo {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: none;
+        }
+        #viewport {
+            position: absolute;
+            inset: 0 44px 0 52px;   /* leave room for the fixed axes */
+            overflow: hidden;
+        }
+        #strip { position: relative; height: 100%; }
+        #strip canvas { position: absolute; left: 0; top: 0; }
+
+        .axis {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 52px;
+            font-size: 12px;
+            color: #9a9a9a;
+        }
+        #axis-left  { left: 0; }
+        #axis-right { right: 0; width: 44px; color: #58a6d8; }
+        .axis span { position: absolute; right: 8px; transform: translateY(-50%); }
+        #axis-right span { right: auto; left: 6px; }
+        .axis .unit { font-size: 11px; color: #666; }
+
+        /* Rows overlaid on the strip (scroll together with the canvas). */
+        .sym, .wind-cell {
+            position: absolute;
+            transform: translateX(-50%);
+            text-align: center;
+        }
+        .sym { font-size: 34px; }
+        .sym.day   { color: #ffd75e; }
+        .sym.night { color: #b9c6ff; }
+        .sym.rain  { color: #58a6d8; }
+        .sym.snow  { color: #cfe8ff; }
+        .sym.grey  { color: #aaa; }
+        .wind-cell { color: #8fb4a8; font-size: 11px; line-height: 1.1; }
+        .wind-cell .ph {
+            display: block;
+            font-size: 14px;
+            margin: 0 auto 1px;
+        }
+    </style>
+</head>
+<body>
+    <div id="spacer"></div>
+    <div id="ui">
+        <header>
+            <div class="place" id="place">WEATHER</div>
+            <i class="ph now-sym" id="now-sym"></i>
+            <div class="now-temp" id="now-temp"></div>
+            <div class="updated" id="updated"></div>
+        </header>
+        <div id="meteo">
+            <div class="axis" id="axis-left"></div>
+            <div id="viewport"><div id="strip"></div></div>
+            <div class="axis" id="axis-right"></div>
+        </div>
+    </div>
+    <div id="status">Loading forecast…</div>
+
+    <script>
+    'use strict';
+
+    // ── Layout constants ──
+    const PX_PER_HOUR = 26;      // hourly region: symbol every 2h needs the room
+    const TOP_PAD = 8;           // above the symbol row
+    const SYM_H = 46;            // symbol row height
+    const DAY_H = 30;            // day-label band height (drawn on canvas)
+    const WIND_H = 44;           // wind row at the bottom
+    const HOUR_LBL_H = 20;       // hour tick labels
+    const REFRESH_MS = 30 * 60 * 1000;
+    // The parent pans webpage iframes in fixed 120px scroll steps (way too
+    // coarse for a 6000px meteogram) — gear the window scroll down so one
+    // wheel tick moves the strip 12px.
+    const SCROLL_FACTOR = 0.1;
+
+    const WARM = '#ff5b45', COLD = '#4da3ff', PRECIP = '#3d84b8';
+    const DAYS_NO = ['søndag', 'mandag', 'tirsdag', 'onsdag',
+                     'torsdag', 'fredag', 'lørdag'];
+
+    // MET symbol_code (base) → phosphor icon + tint class
+    function symbolIcon(code) {
+        if (!code) return null;
+        const night = code.includes('_night');
+        const base = code.replace(/_(day|night|polartwilight)$/, '');
+        const pick = (icon, cls) => ({ icon, cls });
+        if (base.includes('thunder')) return pick('ph-cloud-lightning', 'rain');
+        if (base.includes('sleet') || base.includes('snow'))
+            return pick('ph-cloud-snow', 'snow');
+        if (base.includes('rain') || base.includes('drizzle'))
+            return pick('ph-cloud-rain', 'rain');
+        if (base === 'fog') return pick('ph-cloud-fog', 'grey');
+        if (base === 'cloudy') return pick('ph-cloud', 'grey');
+        if (base === 'partlycloudy' || base === 'fair')
+            return pick(night ? 'ph-cloud-moon' : 'ph-cloud-sun',
+                        night ? 'night' : 'day');
+        if (base === 'clearsky')
+            return pick(night ? 'ph-moon' : 'ph-sun', night ? 'night' : 'day');
+        return pick('ph-cloud', 'grey');
+    }
+
+    // ── Forecast model ──
+    // One entry per MET timeseries point: { t (Date), temp, wind, windDir,
+    // hours (interval length), precip, precipMax, symbol }.
+    function buildPoints(timeseries) {
+        return timeseries.map(p => {
+            const inst = p.data.instant.details;
+            const n1 = p.data.next_1_hours, n6 = p.data.next_6_hours;
+            const next = n1 || n6;
+            return {
+                t: new Date(p.time),
+                temp: inst.air_temperature,
+                wind: inst.wind_speed,
+                windDir: inst.wind_from_direction,
+                hours: n1 ? 1 : (n6 ? 6 : 0),
+                precip: next ? (next.details.precipitation_amount || 0) : 0,
+                precipMax: n1 ? (n1.details.precipitation_amount_max || 0) : 0,
+                symbol: next ? next.summary.symbol_code : null,
+            };
+        });
+    }
+
+    const hoursBetween = (a, b) => (b - a) / 3.6e6;
+
+    // ── Rendering ──
+    function render(data) {
+        const pts = buildPoints(data.forecast.properties.timeseries);
+        if (!pts.length) return;
+
+        document.getElementById('place').textContent = (data.name || 'WEATHER');
+        const upd = new Date((data.fetched || 0) * 1000);
+        document.getElementById('updated').textContent =
+            'yr.no · oppdatert ' +
+            upd.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+        const nowTempEl = document.getElementById('now-temp');
+        nowTempEl.textContent = Math.round(pts[0].temp) + '°';
+        nowTempEl.className = 'now-temp ' + (pts[0].temp >= 0 ? 'warm' : 'cold');
+        const nowSym = symbolIcon(pts[0].symbol);
+        const nowSymEl = document.getElementById('now-sym');
+        nowSymEl.className = 'ph-fill now-sym ' + (nowSym ? nowSym.icon : '');
+
+        document.getElementById('status').style.display = 'none';
+        const meteo = document.getElementById('meteo');
+        meteo.style.display = 'block';
+
+        const strip = document.getElementById('strip');
+        strip.innerHTML = '';
+
+        const t0 = pts[0].t;
+        const tEnd = pts[pts.length - 1].t;
+        const totalH = hoursBetween(t0, tEnd);
+        const x = t => hoursBetween(t0, t) * PX_PER_HOUR;
+        const W = Math.ceil(totalH * PX_PER_HOUR);
+
+        const viewport = document.getElementById('viewport');
+        const H = viewport.clientHeight;
+        strip.style.width = W + 'px';
+
+        // Graph area inside the canvas
+        const gTop = TOP_PAD + SYM_H + DAY_H;
+        const gBot = H - WIND_H - HOUR_LBL_H;
+        const gH = gBot - gTop;
+
+        // Temperature scale: round to 5s, always include 0 when close
+        const temps = pts.map(p => p.temp);
+        let tMin = Math.floor((Math.min(...temps) - 2) / 5) * 5;
+        let tMax = Math.ceil((Math.max(...temps) + 2) / 5) * 5;
+        if (tMin > 0 && tMin <= 5) tMin = 0;
+        if (tMax < 0 && tMax >= -5) tMax = 0;
+        const yT = v => gBot - ((v - tMin) / (tMax - tMin)) * gH;
+
+        // Precipitation scale (right axis), min 4 mm so light rain stays low
+        const maxP = Math.max(4, ...pts.map(p => (p.precipMax || p.precip) / (p.hours || 1)));
+        const pMax = Math.ceil(maxP);
+        const yP = v => gBot - (Math.min(v, pMax) / pMax) * (gH * 0.55);
+
+        // ── Canvas ──
+        const canvas = document.createElement('canvas');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        canvas.style.width = W + 'px';
+        canvas.style.height = H + 'px';
+        strip.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.font = '12px -apple-system, "Segoe UI", Roboto, sans-serif';
+
+        // Day bands + separators + weekday labels
+        let d = new Date(t0); d.setHours(0, 0, 0, 0);
+        for (let i = 0; ; i++) {
+            const dayStart = new Date(d.getTime() + i * 864e5);
+            const dayEnd = new Date(dayStart.getTime() + 864e5);
+            if (dayStart >= tEnd) break;
+            const xs = Math.max(0, x(dayStart)), xe = Math.min(W, x(dayEnd));
+            if (i % 2 === 1) {                      // zebra banding
+                ctx.fillStyle = 'rgba(255,255,255,0.030)';
+                ctx.fillRect(xs, 0, xe - xs, gBot);
+            }
+            ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+            ctx.beginPath(); ctx.moveTo(xs, TOP_PAD); ctx.lineTo(xs, gBot);
+            ctx.stroke();
+            const label = DAYS_NO[dayStart.getDay()] + ' ' + dayStart.getDate() + '.'
+                + (dayStart.getMonth() + 1) + '.';
+            ctx.font = '600 16px -apple-system, "Segoe UI", Roboto, sans-serif';
+            ctx.fillStyle = '#e8e8e8';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, (xs + xe) / 2, TOP_PAD + SYM_H + 20);
+            ctx.font = '12px -apple-system, "Segoe UI", Roboto, sans-serif';
+        }
+
+        // Horizontal temp grid every 5°
+        for (let v = tMin; v <= tMax; v += 5) {
+            ctx.strokeStyle = v === 0 ? 'rgba(255,255,255,0.35)'
+                                      : 'rgba(255,255,255,0.08)';
+            ctx.setLineDash(v === 0 ? [5, 4] : []);
+            ctx.beginPath(); ctx.moveTo(0, yT(v)); ctx.lineTo(W, yT(v));
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Hour ticks/labels (00 06 12 18) — only where hourly/6h data exists
+        ctx.fillStyle = '#777';
+        for (let h = 0; h <= totalH; h++) {
+            const t = new Date(t0.getTime() + h * 3.6e6);
+            const hh = t.getHours();
+            if (hh % 6 !== 0) continue;
+            const px = x(t);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath(); ctx.moveTo(px, gTop); ctx.lineTo(px, gBot); ctx.stroke();
+            ctx.textAlign = 'center';
+            ctx.fillText(String(hh).padStart(2, '0'), px, gBot + 14);
+        }
+
+        // Precipitation bars (per interval, mm/h so 1h and 6h bars compare)
+        for (const p of pts) {
+            if (!p.hours || !(p.precip > 0 || p.precipMax > 0)) continue;
+            const bx = x(p.t), bw = p.hours * PX_PER_HOUR - 1;
+            const rate = p.precip / p.hours;
+            if (p.precipMax > rate * p.hours) {     // upper estimate whisker
+                ctx.fillStyle = 'rgba(88,166,216,0.25)';
+                ctx.fillRect(bx, yP(p.precipMax / p.hours), bw,
+                             gBot - yP(p.precipMax / p.hours));
+            }
+            if (rate > 0) {
+                ctx.fillStyle = 'rgba(88,166,216,0.75)';
+                ctx.fillRect(bx, yP(rate), bw, gBot - yP(rate));
+            }
+        }
+
+        // Temperature curve — Catmull-Rom spline through the points so it
+        // stays smooth even in the sparse 6-hourly region. Colored by sign:
+        // the same path is stroked twice, clipped above/below the 0° line.
+        const cp = pts.map(p => ({ x: x(p.t), y: yT(p.temp) }));
+        const traceSpline = () => {
+            ctx.beginPath();
+            ctx.moveTo(cp[0].x, cp[0].y);
+            for (let i = 0; i < cp.length - 1; i++) {
+                const p0 = cp[i - 1] || cp[i], p1 = cp[i];
+                const p2 = cp[i + 1], p3 = cp[i + 2] || p2;
+                ctx.bezierCurveTo(
+                    p1.x + (p2.x - p0.x) / 6, p1.y + (p2.y - p0.y) / 6,
+                    p2.x - (p3.x - p1.x) / 6, p2.y - (p3.y - p1.y) / 6,
+                    p2.x, p2.y);
+            }
+        };
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = ctx.lineCap = 'round';
+        const zeroInside = tMin < 0 && tMax > 0;
+        if (zeroInside) {
+            for (const warm of [true, false]) {
+                ctx.save();
+                ctx.beginPath();
+                if (warm) ctx.rect(0, 0, W, yT(0));
+                else ctx.rect(0, yT(0), W, H - yT(0));
+                ctx.clip();
+                traceSpline();
+                ctx.strokeStyle = warm ? WARM : COLD;
+                ctx.stroke();
+                ctx.restore();
+            }
+        } else {
+            traceSpline();
+            ctx.strokeStyle = tMax > 0 ? WARM : COLD;
+            ctx.stroke();
+        }
+
+        // "Now" marker
+        const nowX = x(new Date());
+        if (nowX > 0 && nowX < W) {
+            ctx.strokeStyle = 'rgba(255,91,69,0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(nowX, gTop); ctx.lineTo(nowX, gBot);
+            ctx.stroke();
+        }
+
+        // ── Symbol row (DOM icons over the canvas) ──
+        // Hourly region: every 2nd hour. 6-hour region: centered per interval.
+        for (let i = 0; i < pts.length; i++) {
+            const p = pts[i];
+            if (!p.symbol) continue;
+            if (p.hours === 1 && p.t.getHours() % 2 !== 0) continue;
+            const sym = symbolIcon(p.symbol);
+            if (!sym) continue;
+            const el = document.createElement('i');
+            el.className = `ph-fill ${sym.icon} sym ${sym.cls}`;
+            el.style.left = (x(p.t) + p.hours * PX_PER_HOUR / 2) + 'px';
+            el.style.top = TOP_PAD + 'px';
+            strip.appendChild(el);
+        }
+
+        // ── Wind row ── every 3h in the hourly region, else per point
+        for (const p of pts) {
+            if (p.hours === 1 && p.t.getHours() % 3 !== 0) continue;
+            const el = document.createElement('div');
+            el.className = 'wind-cell';
+            const rot = ((p.windDir || 0) + 180) % 360;   // arrow points along the wind
+            el.innerHTML = `<i class="ph ph-arrow-up" style="transform: rotate(${rot}deg)"></i>` +
+                Math.round(p.wind);
+            el.style.left = (x(p.t) + Math.max(1, p.hours) * PX_PER_HOUR / 2) + 'px';
+            el.style.top = (H - WIND_H + 4) + 'px';
+            strip.appendChild(el);
+        }
+
+        // ── Fixed axes ──
+        const axL = document.getElementById('axis-left');
+        axL.innerHTML = '';
+        for (let v = tMin; v <= tMax; v += 5) {
+            const s = document.createElement('span');
+            s.textContent = v + '°';
+            s.style.top = yT(v) + 'px';
+            s.style.color = v > 0 ? WARM : (v < 0 ? COLD : '#9a9a9a');
+            axL.appendChild(s);
+        }
+        const axR = document.getElementById('axis-right');
+        axR.innerHTML = '';
+        for (const v of [pMax, pMax / 2]) {
+            const s = document.createElement('span');
+            s.textContent = (v % 1 ? v.toFixed(1) : v);
+            s.style.top = yP(v) + 'px';
+            axR.appendChild(s);
+        }
+        const unit = document.createElement('span');
+        unit.className = 'unit';
+        unit.textContent = 'mm/t';
+        unit.style.top = (yP(pMax) - 18) + 'px';
+        axR.appendChild(unit);
+
+        // ── Scroll range for the nav wheel bridge ──
+        // hardware-input.js pans webpage iframes with scrollBy(0, ±120); the
+        // spacer turns that vertical scroll into horizontal panning below.
+        const spacer = document.getElementById('spacer');
+        spacer.style.height = (window.innerHeight +
+            Math.max(0, W - viewport.clientWidth) / SCROLL_FACTOR) + 'px';
+        viewport.scrollLeft = window.scrollY * SCROLL_FACTOR;   // keep position across re-render
+    }
+
+    // Window scroll (wheel bridge or emulator mouse wheel) → horizontal pan.
+    window.addEventListener('scroll', () => {
+        document.getElementById('viewport').scrollLeft =
+            window.scrollY * SCROLL_FACTOR;
+    }, { passive: true });
+
+    async function refresh() {
+        try {
+            const resp = await fetch('/weather/forecast');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            render(await resp.json());
+        } catch (e) {
+            console.error('[Weather] forecast failed:', e);
+            if (document.getElementById('meteo').style.display !== 'block') {
+                document.getElementById('status').textContent =
+                    'Værdata utilgjengelig (' + e.message + ')';
+            }
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        refresh();
+        setInterval(refresh, REFRESH_MS);
+        window.addEventListener('resize', refresh);
+    });
+    </script>
+</body>
+</html>

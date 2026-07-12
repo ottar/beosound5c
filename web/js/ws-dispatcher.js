@@ -262,8 +262,19 @@ async function handleMenuItemEvent(uiStore, data) {
         }
         const preset = data.preset && window.SourcePresets?.[data.preset];
         if (preset) {
-            const item = data.title ? { ...preset.item, title: data.title } : preset.item;
-            uiStore.addMenuItem(item, preset.after, preset.view);
+            if (preset.categories?.length) {
+                // Expand a category source (MA) into one menu entry per view,
+                // all sharing the preloaded iframe.
+                let after = preset.after;
+                for (const cat of preset.categories) {
+                    uiStore.addMenuItem({ title: cat.title, path: cat.path }, after, cat.view);
+                    window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
+                    after = cat.path;
+                }
+            } else {
+                const item = data.title ? { ...preset.item, title: data.title } : preset.item;
+                uiStore.addMenuItem(item, preset.after, preset.view);
+            }
             setTimeout(() => {
                 if (preset.onAdd) preset.onAdd(document.getElementById('contentArea'));
             }, 50);
@@ -283,6 +294,19 @@ async function handleMenuItemEvent(uiStore, data) {
             console.warn('[MENU_ITEM] add requires preset or title+path');
         }
     } else if (action === 'remove') {
+        const preset = data.preset && window.SourcePresets?.[data.preset];
+        if (preset?.categories?.length) {
+            // Remove every category entry for this source.
+            for (const cat of preset.categories) {
+                if (uiStore.currentRoute === cat.path && uiStore.navigateToView) {
+                    uiStore.navigateToView('menu/playing');
+                }
+                uiStore.removeMenuItem(cat.path);
+            }
+            if (preset.onRemove) preset.onRemove();
+            if (data.preset) delete _lastSourceUpdate[data.preset];
+            return;
+        }
         const path = data.path || (data.preset && window.SourcePresets?.[data.preset]?.item.path);
         if (path) {
             const preset = data.preset && window.SourcePresets?.[data.preset];

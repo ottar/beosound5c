@@ -64,6 +64,15 @@
                 _maParentUri: item.parent_uri,
                 _maRadio: item.radio,
                 _maImage: item.image,
+                // Context-menu (hold-GO) metadata, defaulted safely — Discover
+                // items may omit these.
+                _maMediaType: item.media_type || '',
+                _maProvider: item.provider || 'library',
+                _maFavorite: !!item.favorite,
+                _maInLibrary: item.in_library !== undefined
+                    ? !!item.in_library : (item.provider || 'library') === 'library',
+                _maArtistUri: item.artist_uri || '',
+                _maAlbumUri: item.album_uri || '',
             };
 
             if (item.image) {
@@ -88,23 +97,153 @@
             return item._maType === 'category';
         }
 
-        /** Send a command to the Music Assistant source service. */
+        /** Send a command to the Music Assistant source service. Returns the
+         *  parsed JSON response (or an {status:'error'} shape) so callers can
+         *  react — the favorite/library toggles gate their optimistic flip on
+         *  a non-error status. */
         async function sendMaCommand(command, params = {}) {
             try {
-                await fetch(`${MA_URL}/command`, {
+                const resp = await fetch(`${MA_URL}/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ command, ...params }),
                 });
+                return await resp.json();
             } catch (e) {
                 console.error(`[MusicAssistant] ${command} failed:`, e.message);
+                return { status: 'error', message: e.message };
             }
         }
+
+        /** Fetch a browse level by full MA URI and swap it into the open
+         *  context menu as a real browse level (Go to artist/album). */
+        async function gotoUri(uri, arcList) {
+            if (!uri || !arcList) return;
+            try {
+                const data = await fetchBrowse('uri/' + uri);
+                arcList.replaceContextMenuLevel((data.items || []).map(mapMaItem));
+            } catch (e) {
+                console.error('[MusicAssistant] goto failed:', e.message);
+            }
+        }
+
+        /** Build the hold-GO action list for a highlighted MA row. Returns null
+         *  for headers / rows without a URI (menu declines). Cancel is always
+         *  index 0 so releasing without scrolling is a no-op. The action matrix
+         *  is keyed off the item's media type (works for non-library Discover
+         *  items too). Runners mutate _maFavorite/_maInLibrary on the shared
+         *  item reference so a reopened menu shows the flipped label. */
+        function contextMenuBuilder(item) {
+            if (!item || item._maType === 'header' || !item._maUri) return null;
+
+            const mt = item._maMediaType
+                || (item._maRadio ? 'radio'
+                    : (item._maType === 'category' ? '' : 'track'));
+            const isTrack = mt === 'track';
+            const isAlbum = mt === 'album';
+            const isPlaylist = mt === 'playlist';
+            const isArtist = mt === 'artist';
+            const isRadio = mt === 'radio';
+            const enqueueable = isTrack || isAlbum || isPlaylist;
+
+            const base = () => ({
+                uri: item._maUri,
+                parent_uri: item._maParentUri || '',
+                name: item.name,
+                artist: item.subtitle || '',
+                image: item._maImage || '',
+                radio: !!item._maRadio,
+            });
+            const play = (extra) => sendMaCommand('play_item', { ...base(), ...extra });
+            const itemId = () => (item._maUri || '').split('/').pop();
+
+            const actions = [
+                { id: 'cancel', name: 'Cancel', icon: 'x-circle',
+                  color: '#B2BEC3', run: () => {} },
+            ];
+
+            if (enqueueable) {
+                actions.push({ id: 'play', name: 'Play now', icon: 'play',
+                    color: '#00B894', run: () => play({ option: 'play' }) });
+                actions.push({ id: 'next', name: 'Play next', icon: 'arrow-line-right',
+                    color: '#00CEC9', run: () => play({ option: 'next' }) });
+                actions.push({ id: 'add', name: 'Add to queue', icon: 'plus',
+                    color: '#74B9FF', run: () => play({ option: 'add' }) });
+            }
+
+            // Play from here — today's GO payload (replace + parent + start_item).
+            // Containers/artists/radio play the whole thing ("Play").
+            actions.push({
+                id: 'replace',
+                name: (isArtist || isRadio) ? 'Play' : 'Play from here',
+                icon: 'play-circle', color: '#0984E3',
+                run: () => play({ option: 'replace' }),
+            });
+
+            if (isTrack || isAlbum || isArtist) {
+                actions.push({ id: 'radio', name: 'Start radio', icon: 'broadcast',
+                    color: '#FF6B6B',
+                    run: () => play({ radio_mode: true, parent_uri: '' }) });
+            }
+
+            if ((isTrack || isAlbum) && item._maArtistUri) {
+                actions.push({ id: 'goto_artist', name: 'Go to artist',
+                    icon: 'microphone-stage', color: '#FD79A8',
+                    run: (acted, arc) => gotoUri(item._maArtistUri, arc) });
+            }
+            if (isTrack && item._maAlbumUri) {
+                actions.push({ id: 'goto_album', name: 'Go to album',
+                    icon: 'vinyl-record', color: '#A29BFE',
+                    run: (acted, arc) => gotoUri(item._maAlbumUri, arc) });
+            }
+
+            const favAdd = !item._maFavorite;
+            actions.push({
+                id: 'favorite',
+                name: favAdd ? 'Add favorite' : 'Remove favorite',
+                icon: favAdd ? 'heart' : 'heart-break', color: '#E84393',
+                run: async () => {
+                    const r = await sendMaCommand('favorite', {
+                        uri: item._maUri, media_type: mt,
+                        item_id: itemId(), add: favAdd });
+                    if (r && r.status !== 'error') item._maFavorite = favAdd;
+                },
+            });
+
+            const libAdd = !item._maInLibrary;
+            actions.push({
+                id: 'library',
+                name: libAdd ? 'Add to library' : 'Remove from library',
+                icon: libAdd ? 'plus-square' : 'minus-square', color: '#55EFC4',
+                run: async () => {
+                    const r = await sendMaCommand('library', {
+                        uri: item._maUri, media_type: mt,
+                        item_id: itemId(), add: libAdd });
+                    if (r && r.status !== 'error') item._maInLibrary = libAdd;
+                },
+            });
+
+            return actions;
+        }
+
+        // Which MA category the arc-list shows as its root. Driven by the
+        // left main-menu (DISCOVER / ARTISTS / ALBUMS / …) via 'open-path'
+        // messages — the categories used to be the arc-list's own root list,
+        // but on BeoSound 5 the views live in the left Arc, so each left-menu
+        // entry sets this section and the list shows that category directly.
+        //
+        // Seeded from localStorage (shared with the parent page — same
+        // origin): re-parenting the preloaded iframe on navigation reloads
+        // this document, losing any in-flight 'open-path' postMessage. The
+        // parent writes the section to localStorage *before* messaging, so a
+        // freshly (re)loaded iframe always boots into the right category.
+        const SECTION_KEY = 'ma_current_section';
+        let currentSection = localStorage.getItem(SECTION_KEY) || 'discover';
 
         document.addEventListener('DOMContentLoaded', () => {
             const arcList = new ArcList({
                 rootLoader: async () => {
-                    const data = await fetchBrowse('');
+                    const data = await fetchBrowse(currentSection);
                     return data.items.map(mapMaItem);
                 },
                 childrenLoader: async (item) => {
@@ -115,9 +254,13 @@
                 levels: [{
                     isContainer,
                 }],
-                storagePrefix: 'music_assistant_arclist',
+                // Per-section state key — each category remembers its own
+                // scroll/drill position, and a reload into a different
+                // section can't restore another section's saved position.
+                storagePrefix: `music_assistant_arclist_${currentSection}`,
                 context: 'music_assistant',
                 webhookUrl: typeof AppConfig !== 'undefined' ? AppConfig.webhookUrl : null,
+                contextMenuBuilder,
                 onGo: async (item) => {
                     if (item._maType === 'header') {
                         return;  // section title — not actionable
@@ -131,13 +274,45 @@
                             image: item._maImage || '',
                             radio: !!item._maRadio,
                         });
+                        return;
+                    }
+                    // Container (artist / album / playlist): GO PLAYS the whole
+                    // thing — matches BeoSound 5, where GO plays and ‹ (left)
+                    // unfolds. Drilling in to pick a specific album/track is the
+                    // ‹ button (ArcList.handleButton('left') -> drillDown).
+                    if (item._maUri) {
+                        await sendMaCommand('play_item', {
+                            uri: item._maUri,
+                            parent_uri: '',
+                            name: item.name,
+                            artist: item.subtitle || '',
+                            image: item._maImage || '',
+                            radio: false,
+                        });
                     } else {
-                        // Categories -> drill in
-                        arcList.drillDown();
+                        arcList.drillDown();  // nothing to play — fall back to drill
                     }
                 },
             });
             window.arcListInstance = arcList;
+        });
+
+        // Left-menu category selection: the parent posts { type:'open-path',
+        // path:'artists' } when a MUSIC view is picked. Switch the root section
+        // and reset the list to that category's top level. Retries from the
+        // parent cover the case where this arrives before the ArcList exists —
+        // init()'s rootLoader then just reads the updated currentSection.
+        window.addEventListener('message', (e) => {
+            if (e.data?.type !== 'open-path') return;
+            const section = e.data.path || 'discover';
+            const inst = window.arcListInstance;
+            if (section === currentSection && inst && inst.depth === 0) return;
+            currentSection = section;
+            try { localStorage.setItem(SECTION_KEY, section); } catch (err) {}
+            if (inst) {
+                inst.config.storagePrefix = `music_assistant_arclist_${section}`;
+                if (inst.jumpToRoot) inst.jumpToRoot();
+            }
         });
     </script>
 </body>

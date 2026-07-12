@@ -15,7 +15,7 @@ const ArcMath = (() => {
             baseItemSize:         _sa.baseItemSize ?? 128,
             maxRadius:            _sa.maxRadius ?? 220,
             horizontalMultiplier: _sa.horizontalMultiplier ?? 0.35,
-            baseXOffset:          _sa.baseXOffset ?? 100,
+            baseXOffset:          _sa.baseXOffset ?? 200,
             scrollSpeed:          _sa.scrollSpeed ?? 0.5,
             scrollStep:           _sa.scrollStep ?? 0.5,
             snapDelay:            _sa.snapDelay ?? 0010,

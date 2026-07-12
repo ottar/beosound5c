@@ -8,7 +8,10 @@ JS, CSS, etc.).  This is appropriate for a local kiosk app.
 """
 
 import http.server
+import json
 import sys
+import threading
+import time
 import urllib.request
 import urllib.error
 
@@ -19,6 +22,80 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 
 # Paths proxied to beo-input (port 8767)
 _PROXY_PREFIXES = ('/config', '/update/', '/discover/')
+
+# ── Weather proxy (MET Norway / yr.no) ──
+#
+# The kiosk fetches /weather/forecast from this server instead of calling
+# api.met.no directly: browsers can't set the identifying User-Agent MET's
+# terms require, and a server-side cache keeps us well under their rate
+# limits (MET updates the forecast roughly every half hour anyway).
+# Location comes from the `weather` config section (default: Bergen).
+
+WEATHER_PATH = '/weather/forecast'
+_MET_URL = ('https://api.met.no/weatherapi/locationforecast/2.0/complete'
+            '?lat={lat:.4f}&lon={lon:.4f}&altitude={alt}')
+_WEATHER_UA = 'BeoSound5c/1.0 github.com/ottar/beosound5c'
+_WEATHER_TTL = 30 * 60  # seconds between upstream fetches
+
+_weather_lock = threading.Lock()
+_weather_cache = {'key': None, 'body': None, 'fetched': 0.0}
+
+
+def _weather_forecast_body() -> bytes:
+    """Return the cached forecast JSON, refreshing from MET when stale.
+    On upstream failure a stale cache (any age) is served rather than an
+    error — an old forecast beats an empty WEATHER page."""
+    from lib.config import cfg
+    lat = float(cfg('weather', 'lat', default=60.393))
+    lon = float(cfg('weather', 'lon', default=5.3242))
+    alt = int(cfg('weather', 'altitude', default=12))
+    name = cfg('weather', 'name', default='Bergen')
+    key = (lat, lon, alt)
+    now = time.time()
+
+    with _weather_lock:
+        fresh = (_weather_cache['key'] == key
+                 and now - _weather_cache['fetched'] < _WEATHER_TTL)
+        if fresh:
+            return _weather_cache['body']
+
+    req = urllib.request.Request(
+        _MET_URL.format(lat=lat, lon=lon, alt=alt),
+        headers={'User-Agent': _WEATHER_UA})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            forecast = json.loads(resp.read())
+        body = json.dumps({'name': name, 'lat': lat, 'lon': lon,
+                           'fetched': int(now),
+                           'forecast': forecast}).encode()
+        with _weather_lock:
+            _weather_cache.update(key=key, body=body, fetched=now)
+        return body
+    except Exception:
+        with _weather_lock:
+            if _weather_cache['key'] == key and _weather_cache['body']:
+                return _weather_cache['body']
+        raise
+
+
+def _serve_weather(handler) -> bool:
+    """Handle GET /weather/forecast. Returns True if handled."""
+    if handler.path.split('?')[0] != WEATHER_PATH:
+        return False
+    try:
+        body = _weather_forecast_body()
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        handler.wfile.write(body)
+    except Exception as e:
+        handler.send_response(502)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Access-Control-Allow-Origin', '*')
+        handler.end_headers()
+        handler.wfile.write(json.dumps({'error': str(e)}).encode())
+    return True
 
 
 def _proxy_to_input(handler, method: str) -> bool:
@@ -76,6 +153,8 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/config':
             self._redirect_config()
+            return
+        if _serve_weather(self):
             return
         if _proxy_to_input(self, 'GET'):
             return

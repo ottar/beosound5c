@@ -152,6 +152,45 @@ def test_play_without_media_resumes(player):
         ("players/cmd/play", {"player_id": "shelf"})]
 
 
+def test_play_option_forwarded_to_play_media(player):
+    _run(player.play(uri="library://track/1", option="next"))
+    _, args = player._client.commands("player_queues/play_media")[0]
+    assert args["option"] == "next"
+
+
+def test_play_invalid_option_falls_back_to_replace(player):
+    _run(player.play(uri="library://track/1", option="bogus"))
+    _, args = player._client.commands("player_queues/play_media")[0]
+    assert args["option"] == "replace"
+
+
+def test_handle_play_omits_option_when_absent(player):
+    """_handle_play must not pass `option` to play() when the request body
+    lacks it — the other players' play() signatures have no such kwarg."""
+    seen = {}
+
+    async def fake_play(**kwargs):
+        seen.update(kwargs)
+        return True
+
+    player.play = fake_play
+    _run(player._handle_play(FakeRequest({"uri": "library://track/1"})))
+    assert "option" not in seen
+
+
+def test_handle_play_forwards_option_when_present(player):
+    seen = {}
+
+    async def fake_play(**kwargs):
+        seen.update(kwargs)
+        return True
+
+    player.play = fake_play
+    _run(player._handle_play(
+        FakeRequest({"uri": "library://track/1", "option": "add"})))
+    assert seen["option"] == "add"
+
+
 # ── Transport ──
 
 def test_transport_commands_map_to_players_cmd(player):
@@ -204,9 +243,62 @@ def test_restore_target_picks_sole_available(player):
     assert player._target_id == "shelf"
 
 
+def test_restore_target_prefers_playing_over_persisted(player):
+    # Persisted target is idle; a different speaker is playing → adopt the
+    # playing one so a restart re-attaches to live playback.
+    player._players["coffee"]["playback_state"] = "playing"
+    player._state_store.save({"player_id": "shelf"})
+    player._target_id = None
+    player._restore_target()
+    assert player._target_id == "coffee"
+    # New live target is persisted so it survives the next restart too.
+    assert player._state_store.load()["player_id"] == "coffee"
+
+
+def test_restore_target_keeps_persisted_when_it_is_playing(player):
+    # Both the persisted target and another speaker are playing → keep the
+    # persisted one (no needless hop between independent playbacks).
+    player._players["shelf"]["playback_state"] = "playing"
+    player._players["coffee"]["playback_state"] = "playing"
+    player._state_store.save({"player_id": "shelf"})
+    player._target_id = None
+    player._restore_target()
+    assert player._target_id == "shelf"
+
+
 def test_set_target_persists(player):
     player._set_target("coffee")
     assert player._state_store.load()["player_id"] == "coffee"
+
+
+def test_play_track_radio_uses_radio_mode(player):
+    ok = _run(player.play_track_radio("library://track/42"))
+    assert ok
+    cmd, args = player._client.commands("player_queues/play_media")[0]
+    assert args == {"queue_id": "shelf", "media": "library://track/42",
+                    "radio_mode": True}
+
+
+def test_play_track_radio_without_target_or_uri(player):
+    player._target_id = None
+    assert not _run(player.play_track_radio("library://track/42"))
+    player._target_id = "shelf"
+    assert not _run(player.play_track_radio(""))
+
+
+def test_get_shuffle_reads_queue_state(player):
+    player._client.responses["player_queues/get"] = {"shuffle_enabled": True}
+    assert _run(player.get_shuffle()) is True
+    player._client.responses["player_queues/get"] = {"shuffle_enabled": False}
+    assert _run(player.get_shuffle()) is False
+
+
+def test_get_shuffle_unknown_when_unavailable(player):
+    player._target_id = None
+    assert _run(player.get_shuffle()) is None
+    player._target_id = "shelf"
+    player._client.fail_commands.add("player_queues/get")
+    assert _run(player.get_shuffle()) is None
 
 
 def test_select_target_transfers_queue_when_playing(player):
