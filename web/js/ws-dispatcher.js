@@ -110,6 +110,12 @@ function processWebSocketEvent(message) {
     const type = message.type;
     const data = message.data;
 
+    // Every hardware input feeds the screensaver's idle timer (and hides
+    // it when visible) before normal dispatch.
+    if (type === 'laser' || type === 'nav' || type === 'volume' || type === 'button') {
+        window.ScreenSaver?.touch();
+    }
+
     switch (type) {
         case 'laser':
             processLaserEvent(data);

@@ -371,6 +371,10 @@ const CFG_SOURCE_DEFS = [
     ]},
     { key: 'WEATHER', label: 'Weather', isUrl: true, fields: [
         { fid: 'url', label: 'Page URL', path: ['_menu_url'], default: 'softarc/weather.html', placeholder: 'softarc/weather.html' },
+        { fid: 'place', label: 'Place name', path: ['weather','name'], placeholder: 'Bergen' },
+        { fid: 'lat', label: 'Latitude', path: ['weather','lat'], numeric: true, placeholder: '60.393' },
+        { fid: 'lon', label: 'Longitude', path: ['weather','lon'], numeric: true, placeholder: '5.3242' },
+        { fid: 'altitude', label: 'Altitude (m)', path: ['weather','altitude'], numeric: true, optional: true, placeholder: '12' },
     ]},
     { key: 'SYSTEM', label: 'System', fixed: true },
     { key: 'SHOWING', label: 'Now Playing on TV', fields: [
@@ -428,6 +432,7 @@ function render(cfg) {
         renderPlayer(cfg) +
         renderVolume(cfg) +
         renderHA(cfg) +
+        renderScreensaver(cfg) +
         renderMasterlink(cfg) +
         renderRadioFavorites(cfg) +
         renderSources(cfg) +
@@ -549,6 +554,34 @@ function balanceLabel(b) {
     if (b === 0) return '0';
     if (b < 0) return `L${b}`;
     return `R+${b}`;
+}
+
+function renderScreensaver(cfg) {
+    const ss = cfg.screensaver || {};
+    const timeout = Number.isFinite(Number(ss.timeout)) ? Number(ss.timeout) : 10;
+    const content = ss.content || 'clock';
+    const opts = [
+        ['clock',   'Clock'],
+        ['weather', 'Clock + weather'],
+        ['covers',  'Album covers (library slideshow)'],
+        ['black',   'Black'],
+    ].map(([v, l]) => `<option value="${v}" ${content===v?'selected':''}>${l}</option>`).join('');
+    return `<div class="cfg-card">
+        <h2>Screensaver</h2>
+        <div class="row-2">
+            <div>
+                <label for="cfg-ss-timeout">Idle time (minutes, 0 = off)</label>
+                <input id="cfg-ss-timeout" type="number" min="0" value="${timeout}">
+            </div>
+            <div>
+                <label for="cfg-ss-content">Content</label>
+                <select id="cfg-ss-content">${opts}</select>
+            </div>
+        </div>
+        <div class="hint">Shows after the idle time when nothing is playing (active playback keeps
+        the immersive now-playing view). Any wheel, button or pointer input dismisses it.
+        Auto-standby still turns the screen fully off later.</div>
+    </div>`;
 }
 
 function renderHA(cfg) {
@@ -1671,6 +1704,11 @@ function buildConfig() {
     } else {
         delete cfg.volume.tone;
     }
+    const ssTimeout = parseInt(document.getElementById('cfg-ss-timeout')?.value);
+    cfg.screensaver = {
+        timeout: Number.isFinite(ssTimeout) && ssTimeout >= 0 ? ssTimeout : 10,
+        content: document.getElementById('cfg-ss-content')?.value || 'clock',
+    };
     cfg.home_assistant = cfg.home_assistant || {};
     cfg.home_assistant.url = document.getElementById('cfg-ha-url')?.value || '';
     cfg.home_assistant.webhook_url = document.getElementById('cfg-ha-webhook')?.value || '';
@@ -1701,8 +1739,17 @@ function buildConfig() {
             let obj = cfg;
             for (let i = 0; i < f.path.length - 1; i++) { if (!obj[f.path[i]]) obj[f.path[i]] = {}; obj = obj[f.path[i]]; }
             const leaf = f.path[f.path.length - 1];
-            if (f.isIr && !val) { delete obj[leaf]; } else { obj[leaf] = val; }
+            if (f.isIr && !val) { delete obj[leaf]; }
+            else if (f.numeric) { const n = parseFloat(val); if (Number.isFinite(n)) obj[leaf] = n; }
+            else { obj[leaf] = val; }
         });
+    });
+    // Preserve menu entries this UI doesn't know about (hand-added webpage
+    // entries in /etc config etc.) — rebuilding from CFG_SOURCE_DEFS alone
+    // silently deleted them on every save (that's how WEATHER once vanished).
+    const knownMenuKeys = new Set(CFG_SOURCE_DEFS.map(s => s.key));
+    Object.entries(cfg.menu || {}).forEach(([k, v]) => {
+        if (!knownMenuKeys.has(k) && !(k in newMenu)) newMenu[k] = v;
     });
     cfg.menu = newMenu;
 

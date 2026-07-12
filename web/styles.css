@@ -981,6 +981,86 @@ html, body {
   color: rgba(255, 255, 255, 0.3);
 }
 
+/* Screensaver overlay (js/screensaver.js) — sits under the volume overlay
+   (z 99990) so wheel feedback still shows the instant the saver wakes. */
+#screensaver-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 600ms ease;
+}
+#screensaver-overlay.visible {
+  opacity: 1;
+}
+#screensaver-overlay .ss-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#screensaver-overlay .ss-center {
+  text-align: center;
+  transition: transform 2s ease;
+}
+#screensaver-overlay .ss-time {
+  font-size: 9rem;
+  font-weight: 200;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1;
+}
+#screensaver-overlay .ss-date {
+  margin-top: 18px;
+  font-size: 1.4rem;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: capitalize;
+}
+#screensaver-overlay .ss-wx {
+  margin-top: 26px;
+  font-size: 1.6rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+#screensaver-overlay .ss-wx-sym {
+  text-transform: capitalize;
+  color: rgba(255, 255, 255, 0.4);
+}
+#screensaver-overlay .ss-wx-place {
+  color: rgba(255, 255, 255, 0.25);
+}
+#screensaver-overlay .ss-cover-wrap {
+  text-align: center;
+}
+#screensaver-overlay .ss-cover {
+  width: 420px;
+  height: 420px;
+  object-fit: cover;
+  border-radius: 6px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+}
+#screensaver-overlay .ss-cover-name {
+  margin-top: 22px;
+  font-size: 1.3rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+#screensaver-overlay .ss-cover-sub {
+  margin-top: 6px;
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.35);
+}
+#screensaver-overlay .ss-corner-clock {
+  position: absolute;
+  top: 28px;
+  right: 40px;
+  font-size: 1.6rem;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.4);
+}
+
 /* Volume Overlay */
 #volume-overlay {
   position: fixed;

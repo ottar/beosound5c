@@ -1812,6 +1812,19 @@ def scan_loop(loop):
                     if laser_pos is None:
                         continue
 
+                    # Wake the screen on any user input while it is off —
+                    # wheels, GO/‹/›, or laser movement. The power button is
+                    # excluded: its own toggle handles it (waking here first
+                    # would make the toggle turn the screen right back off).
+                    if not is_backlight_on():
+                        woke_by = (nav_evt or vol_evt
+                                   or (btn_evt and btn_evt.get('button')
+                                       not in ('power',))
+                                   or (not first and laser_pos != last_laser))
+                        if woke_by:
+                            logger.info("Input while screen off -> wake")
+                            set_backlight(True)
+
                     for evt_type, evt in (
                         ('nav',    nav_evt),
                         ('volume', vol_evt),
