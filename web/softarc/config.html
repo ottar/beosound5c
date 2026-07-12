@@ -350,7 +350,13 @@ const CFG_SOURCE_DEFS = [
     { key: 'RADIO', label: 'Radio', fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['radio','source'], isIr: true, optional: true },
     ]},
-    { key: 'MUSIC', label: 'Music Assistant',
+    { key: 'MUSIC', label: 'Music Assistant', checksField: {
+        label: 'Library views', path: ['music_assistant','categories'],
+        options: [
+            ['discover', 'Discover'], ['artists', 'Artists'],
+            ['albums', 'Albums'], ['playlists', 'Playlists'],
+            ['tracks', 'Tracks'], ['radios', 'Radio'],
+        ]},
       hint: 'Browses the Music Assistant library. Uses the MA server and token from the Player card (player type Music Assistant).',
       fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['music_assistant','source'], isIr: true, optional: true },
@@ -734,7 +740,7 @@ function renderSources(cfg) {
     const rows = CFG_SOURCE_DEFS.map(src => {
         const kn = src.key.replace(/ /g,'_').toLowerCase();
         const enabled = src.fixed || (src.key in menu);
-        const hasFields = !!(src.fields && src.fields.length);
+        const hasFields = !!(src.fields && src.fields.length) || !!src.checksField;
 
         const checkHtml = src.fixed
             ? `<input type="checkbox" checked disabled>`
@@ -746,8 +752,20 @@ function renderSources(cfg) {
 
         const infoBlock = src.infoHtml ? `<div class="cfg-instructions">${src.infoHtml}</div>` : '';
         const hintHtml = (!hasFields && src.hint) ? `<div style="margin:2px 0 4px 30px;font-size:12px;color:#444">${src.hint}</div>` : '';
+        // Multi-checkbox field (e.g. MUSIC's library views): current config
+        // array selects; absent/empty = all options checked.
+        const checksHtml = src.checksField ? (() => {
+            const cf = src.checksField;
+            const cur = cfgGet(cfg, cf.path);
+            const on = new Set(Array.isArray(cur) && cur.length ? cur : cf.options.map(o => o[0]));
+            return `<label>${cf.label}</label>` + cf.options.map(([v, l]) =>
+                `<label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer">
+                 <input type="checkbox" class="cfg-checks-${kn}" value="${v}" ${on.has(v)?'checked':''}> ${l}</label>`
+            ).join('');
+        })() : '';
+
         const fieldsHtml = hasFields ? `<div id="cfg-src-${kn}-body" class="sub-section cfg-cond${enabled?' show':''}">
-            ${infoBlock}${src.fields.map(f => {
+            ${infoBlock}${checksHtml}${(src.fields || []).map(f => {
                 if (f.isIr) {
                     const currentVal = cfgGet(cfg, f.path) || '';
                     const opts = BEO4_SOURCES.map(s => {
@@ -1743,6 +1761,14 @@ function buildConfig() {
             else if (f.numeric) { const n = parseFloat(val); if (Number.isFinite(n)) obj[leaf] = n; }
             else { obj[leaf] = val; }
         });
+        if (src.checksField) {
+            const vals = Array.from(document.querySelectorAll(`.cfg-checks-${kn}:checked`))
+                              .map(el => el.value);
+            const p = src.checksField.path;
+            let obj = cfg;
+            for (let i = 0; i < p.length - 1; i++) { if (!obj[p[i]]) obj[p[i]] = {}; obj = obj[p[i]]; }
+            obj[p[p.length - 1]] = vals;
+        }
     });
     // Preserve menu entries this UI doesn't know about (hand-added webpage
     // entries in /etc config etc.) — rebuilding from CFG_SOURCE_DEFS alone

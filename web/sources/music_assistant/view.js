@@ -47,7 +47,9 @@ const MA_CONTAINER_ID = 'music-assistant-container';
 const MA_IFRAME_SRC = 'softarc/music_assistant.html';
 
 // Menu label → MA browse path. Order = order in the left Arc.
-const MA_CATEGORIES = [
+// `music_assistant.categories` in config (edited in the config UI's MUSIC
+// card) selects which of these appear; absent/empty = all of them.
+const MA_ALL_CATEGORIES = [
     { title: 'DISCOVER', path: 'menu/ma_discover', section: 'discover' },
     { title: 'ARTISTS', path: 'menu/ma_artists', section: 'artists' },
     { title: 'ALBUMS', path: 'menu/ma_albums', section: 'albums' },
@@ -55,6 +57,14 @@ const MA_CATEGORIES = [
     { title: 'TRACKS', path: 'menu/ma_tracks', section: 'tracks' },
     { title: 'RADIO', path: 'menu/ma_radio', section: 'radios' },
 ];
+
+const MA_CATEGORIES = (() => {
+    const sel = window.AppConfig?.raw?.music_assistant?.categories;
+    if (!Array.isArray(sel) || sel.length === 0) return MA_ALL_CATEGORIES;
+    const enabled = new Set(sel);
+    const picked = MA_ALL_CATEGORIES.filter(c => enabled.has(c.section));
+    return picked.length ? picked : MA_ALL_CATEGORIES;
+})();
 
 // Opt these MA browse routes into the hold-GO context menu (hardware-input.js
 // checks this Set before arming the hold timer). Only routes whose iframe

@@ -78,6 +78,9 @@ const AppConfig = {
 // Falls back to ../config/default.json for local development
 (function() {
     function applyConfig(config) {
+        // Full parsed config for modules that need sections not mirrored
+        // into AppConfig fields (e.g. music_assistant.categories).
+        AppConfig.raw = config;
         if (config.device) AppConfig.deviceName = config.device;
         if (config.scenes) AppConfig.scenes = config.scenes;
         if (config.home_assistant) {
