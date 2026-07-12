@@ -66,6 +66,11 @@ const MA_CATEGORIES = (() => {
     return picked.length ? picked : MA_ALL_CATEGORIES;
 })();
 
+// Submenu mode (`music_assistant.submenu` in config): the root arc gets a
+// single MUSIC entry that swaps the left menu to the library views —
+// classic BeoSound 5 style. MA's RADIO always stays on the root menu.
+const MA_SUBMENU_MODE = !!window.AppConfig?.raw?.music_assistant?.submenu;
+
 // Opt these MA browse routes into the hold-GO context menu (hardware-input.js
 // checks this Set before arming the hold timer). Only routes whose iframe
 // understands 'context_open'/'go_release' — i.e. the MA arc-list — register.
@@ -121,12 +126,30 @@ window.SourcePresets.music_assistant = {
         containerId: MA_CONTAINER_ID,
     },
     // Left-Arc view entries — expanded into individual menu items by MenuManager.
-    categories: MA_CATEGORIES.map(cat => ({
+    // In submenu mode only RADIO stays at root; the rest live behind MUSIC.
+    categories: (MA_SUBMENU_MODE
+        ? MA_CATEGORIES.filter(c => c.section === 'radios')
+        : MA_CATEGORIES
+    ).map(cat => ({
         title: cat.title,
         path: cat.path,
         section: cat.section,
         view: _maCategoryView(cat),
     })),
+
+    // Submenu-mode root entry: MenuManager swaps the left menu to these
+    // items when the laser lands on MUSIC ('‹ BACK' restores the root).
+    submenu: (() => {
+        if (!MA_SUBMENU_MODE) return null;
+        const items = MA_CATEGORIES.filter(c => c.section !== 'radios')
+            .map(cat => ({
+                title: cat.title,
+                path: cat.path,
+                section: cat.section,
+                view: _maCategoryView(cat),
+            }));
+        return items.length ? { title: 'MUSIC', path: 'menu/ma_submenu', items } : null;
+    })(),
 
     onAdd() {},
     onMount() {},

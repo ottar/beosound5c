@@ -203,10 +203,17 @@ class UIStore {
             this.view.setMenuVisible(true);
         }
 
-        // Navigate when the effective path differs
+        // Navigate when the effective path differs. Submenu triggers
+        // (MUSIC in submenu mode, and its '‹ BACK') swap the left menu in
+        // place instead of navigating; whatever lands under the laser in
+        // the swapped menu navigates on the next event.
         if (effectivePath && effectivePath !== this.view.currentRoute) {
-            this.view.navigateToView(effectivePath);
-            this.menu._currentRoute = this.view.currentRoute;
+            if (this.menu.handleMenuTrigger?.(effectivePath)) {
+                this.sendClickCommand();
+            } else {
+                this.view.navigateToView(effectivePath);
+                this.menu._currentRoute = this.view.currentRoute;
+            }
         }
 
         // Bold + click (only for non-overlay menu items)

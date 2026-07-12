@@ -127,11 +127,27 @@ class MenuManager {
                         await this.loadSourceScript(item.preset);
                     }
                     const preset = window.SourcePresets?.[item.preset];
-                    if (preset?.categories?.length) {
+                    if (preset?.submenu || preset?.categories?.length) {
+                        // Submenu-mode root entry (MA's single MUSIC item):
+                        // laser-selecting it swaps the left menu to its items
+                        // (see enterSubmenu). Views registered up front so
+                        // the routes work as soon as the submenu opens.
+                        if (preset.submenu) {
+                            for (const cat of preset.submenu.items) {
+                                this.views[cat.path] = cat.view || preset.view;
+                                window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
+                            }
+                            newItems.push({
+                                title: preset.submenu.title,
+                                path: preset.submenu.path,
+                                dynamic: true,
+                                submenuItems: preset.submenu.items,
+                            });
+                        }
                         // Source exposes its browse categories as separate
                         // left-menu views (MA: DISCOVER/ARTISTS/ALBUMS/…), all
                         // sharing the one preloaded iframe.
-                        for (const cat of preset.categories) {
+                        for (const cat of preset.categories || []) {
                             newItems.push({ title: cat.title, path: cat.path, dynamic: true });
                             this.views[cat.path] = cat.view || preset.view;
                             window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
@@ -150,6 +166,7 @@ class MenuManager {
                 }
             }
             this.menuItems = newItems;
+            this._rootMenuItems = null;   // a menu rebuild always exits any open submenu
 
             // Sync to laser position mapper
             if (window.LaserPositionMapper?.updateMenuItems) {
@@ -354,6 +371,41 @@ class MenuManager {
         });
     }
 
+    // ── Submenu (single MUSIC entry swaps the left menu) ──
+
+    /** Laser landed on `path` — swap or restore the menu if it's a submenu
+     *  trigger / the BACK entry. Returns true when the menu changed (the
+     *  caller must then skip view navigation for this event). */
+    handleMenuTrigger(path) {
+        if (path === '__submenu_back') return this.exitSubmenu();
+        const item = this.menuItems.find(m => m.path === path);
+        if (item?.submenuItems?.length) return this.enterSubmenu(item);
+        return false;
+    }
+
+    enterSubmenu(item) {
+        if (this._rootMenuItems) return false;   // already inside one
+        this._rootMenuItems = this.menuItems;
+        this.menuItems = [
+            { title: '‹ BACK', path: '__submenu_back' },
+            ...item.submenuItems.map(c => ({ title: c.title, path: c.path, dynamic: true })),
+        ];
+        window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
+        this.renderMenuItems();
+        console.log(`[MENU] Entered submenu: ${item.title}`);
+        return true;
+    }
+
+    exitSubmenu() {
+        if (!this._rootMenuItems) return false;
+        this.menuItems = this._rootMenuItems;
+        this._rootMenuItems = null;
+        window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
+        this.renderMenuItems();
+        console.log('[MENU] Exited submenu');
+        return true;
+    }
+
     renderMenuItems() {
         const menuContainer = document.getElementById('menuItems');
         if (!menuContainer) return;
@@ -420,7 +472,9 @@ class MenuManager {
 
         const afterIndex = this.menuItems.findIndex(m => m.path === afterPath);
         const insertAt = afterIndex !== -1 ? afterIndex + 1 : this.menuItems.length;
-        this.menuItems.splice(insertAt, 0, { title: item.title, path: item.path, dynamic: true });
+        const entry = { title: item.title, path: item.path, dynamic: true };
+        if (item.submenuItems) entry.submenuItems = item.submenuItems;
+        this.menuItems.splice(insertAt, 0, entry);
 
         if (viewDef) {
             this.views[item.path] = viewDef;
