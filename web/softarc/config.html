@@ -329,6 +329,7 @@ const CFG_SOURCE_DEFS = [
     { key: 'JOIN', label: 'Join (multi-room)', fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['join','source'], isIr: true, optional: true },
         { fid: 'default_player', label: 'Default Sonos group', path: ['join','default_player'], placeholder: 'e.g. Kitchen and Dining', optional: true },
+        { fid: 'overlay_timeout', label: 'Speaker overlay timeout (s)', path: ['join','overlay_timeout'], numeric: true, optional: true, placeholder: '15' },
     ]},
     { key: 'SPOTIFY', label: 'Spotify', authPort: 8772, authScheme: 'https',
       infoHtml: `Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard</a> → Create app. Add this Redirect URI:<br><code>https://${location.hostname}:8772/callback</code><br>Paste your Client ID below, then click <em>Authenticate →</em> to log in.`,
@@ -350,13 +351,27 @@ const CFG_SOURCE_DEFS = [
     { key: 'RADIO', label: 'Radio', fields: [
         { fid: 'ir_source', label: 'IR trigger', path: ['radio','source'], isIr: true, optional: true },
     ]},
-    { key: 'MUSIC', label: 'Music Assistant', checksField: {
-        label: 'Library views', path: ['music_assistant','categories'],
-        options: [
+    { key: 'MUSIC', label: 'Music Assistant', checksFields: [
+        { fid: 'categories', label: 'Library views', path: ['music_assistant','categories'],
+          options: [
             ['discover', 'Discover'], ['artists', 'Artists'],
             ['albums', 'Albums'], ['playlists', 'Playlists'],
             ['tracks', 'Tracks'], ['radios', 'Radio'],
         ]},
+        { fid: 'discover_rows', label: 'Discover rows', path: ['music_assistant','discover_rows'],
+          options: [
+            ['in_progress', 'In progress'],
+            ['recently_played', 'Recently played'],
+            ['stations_for_you', 'Stations for you'],
+            ['recently_added_tracks', 'Recently added tracks'],
+            ['recently_added_albums', 'Recently added albums'],
+            ['random_artists', 'Random artists'],
+            ['random_albums', 'Random albums'],
+            ['recent_favorite_tracks', 'Recently favorited tracks'],
+            ['favorite_playlists', 'Favorite playlists'],
+            ['favorite_radio', 'Favorite radio stations'],
+        ]},
+      ],
       boolFields: [
         { fid: 'submenu', label: 'Single MUSIC entry (opens a library submenu)',
           path: ['music_assistant','submenu'],
@@ -571,6 +586,7 @@ function renderScreensaver(cfg) {
     const ss = cfg.screensaver || {};
     const timeout = Number.isFinite(Number(ss.timeout)) ? Number(ss.timeout) : 10;
     const content = ss.content || 'clock';
+    const standby = Number.isFinite(Number(cfg.auto_standby?.timeout)) ? Number(cfg.auto_standby.timeout) : 30;
     const opts = [
         ['clock',   'Clock'],
         ['weather', 'Clock + weather'],
@@ -589,9 +605,16 @@ function renderScreensaver(cfg) {
                 <select id="cfg-ss-content">${opts}</select>
             </div>
         </div>
-        <div class="hint">Shows after the idle time when nothing is playing (active playback keeps
-        the immersive now-playing view). Any wheel, button or pointer input dismisses it.
-        Auto-standby still turns the screen fully off later.</div>
+        <div class="row-2" style="margin-top:10px">
+            <div>
+                <label for="cfg-standby-timeout">Auto standby (minutes, 0 = never)</label>
+                <input id="cfg-standby-timeout" type="number" min="0" value="${standby}">
+            </div>
+            <div></div>
+        </div>
+        <div class="hint">The screensaver shows after the idle time when nothing is playing (active
+        playback keeps the immersive now-playing view); any wheel, button or pointer input dismisses
+        it. Auto standby turns the screen and speakers fully off after the longer idle period.</div>
     </div>`;
 }
 
@@ -726,6 +749,13 @@ function renderMasterlink(cfg) {
                     Listen to video IR commands
                 </label>
             </div>
+            <label style="display:flex;align-items:center;gap:8px;margin:12px 0 0;font-weight:400;cursor:pointer">
+                <input id="cfg-remote-handle-all" type="checkbox" ${cfg.remote?.handle_all?'checked':''}>
+                Handle all Beo4 device types locally
+            </label>
+            <div class="hint">Off: only device types matching the configured source buttons are
+            handled here — the rest (typically Video-mode presses) forward to Home Assistant /
+            MQTT. On: everything is handled locally and nothing falls through.</div>
         </div>
 
         <div class="hint" style="margin-top:14px">Audio over Master Link physically rides the bus only when the Volume output is PowerLink. With Sonos/BlueSound players the BS5c can still exchange control telegrams (source requests, IR forwarding, track metadata) but cannot bridge audio onto the ML bus.</div>
@@ -745,7 +775,8 @@ function renderSources(cfg) {
     const rows = CFG_SOURCE_DEFS.map(src => {
         const kn = src.key.replace(/ /g,'_').toLowerCase();
         const enabled = src.fixed || (src.key in menu);
-        const hasFields = !!(src.fields && src.fields.length) || !!src.checksField
+        const hasFields = !!(src.fields && src.fields.length)
+            || !!(src.checksFields && src.checksFields.length)
             || !!(src.boolFields && src.boolFields.length);
 
         const checkHtml = src.fixed
@@ -766,17 +797,16 @@ function renderSources(cfg) {
              ${f.hint ? `<div class="hint">${f.hint}</div>` : ''}`
         ).join('');
 
-        // Multi-checkbox field (e.g. MUSIC's library views): current config
-        // array selects; absent/empty = all options checked.
-        const checksHtml = src.checksField ? (() => {
-            const cf = src.checksField;
+        // Multi-checkbox fields (e.g. MUSIC's library views / Discover rows):
+        // current config array selects; absent/empty = all options checked.
+        const checksHtml = (src.checksFields || []).map(cf => {
             const cur = cfgGet(cfg, cf.path);
             const on = new Set(Array.isArray(cur) && cur.length ? cur : cf.options.map(o => o[0]));
             return `<label>${cf.label}</label>` + cf.options.map(([v, l]) =>
                 `<label style="display:flex;align-items:center;gap:8px;font-weight:400;cursor:pointer">
-                 <input type="checkbox" class="cfg-checks-${kn}" value="${v}" ${on.has(v)?'checked':''}> ${l}</label>`
+                 <input type="checkbox" class="cfg-checks-${kn}-${cf.fid}" value="${v}" ${on.has(v)?'checked':''}> ${l}</label>`
             ).join('');
-        })() : '';
+        }).join('');
 
         const fieldsHtml = hasFields ? `<div id="cfg-src-${kn}-body" class="sub-section cfg-cond${enabled?' show':''}">
             ${infoBlock}${boolsHtml}${checksHtml}${(src.fields || []).map(f => {
@@ -1741,6 +1771,9 @@ function buildConfig() {
         timeout: Number.isFinite(ssTimeout) && ssTimeout >= 0 ? ssTimeout : 10,
         content: document.getElementById('cfg-ss-content')?.value || 'clock',
     };
+    const standbyTimeout = parseInt(document.getElementById('cfg-standby-timeout')?.value);
+    cfg.auto_standby = cfg.auto_standby || {};
+    if (Number.isFinite(standbyTimeout) && standbyTimeout >= 0) cfg.auto_standby.timeout = standbyTimeout;
     cfg.home_assistant = cfg.home_assistant || {};
     cfg.home_assistant.url = document.getElementById('cfg-ha-url')?.value || '';
     cfg.home_assistant.webhook_url = document.getElementById('cfg-ha-webhook')?.value || '';
@@ -1775,14 +1808,14 @@ function buildConfig() {
             else if (f.numeric) { const n = parseFloat(val); if (Number.isFinite(n)) obj[leaf] = n; }
             else { obj[leaf] = val; }
         });
-        if (src.checksField) {
-            const vals = Array.from(document.querySelectorAll(`.cfg-checks-${kn}:checked`))
+        (src.checksFields || []).forEach(cf => {
+            const vals = Array.from(document.querySelectorAll(`.cfg-checks-${kn}-${cf.fid}:checked`))
                               .map(el => el.value);
-            const p = src.checksField.path;
+            const p = cf.path;
             let obj = cfg;
             for (let i = 0; i < p.length - 1; i++) { if (!obj[p[i]]) obj[p[i]] = {}; obj = obj[p[i]]; }
             obj[p[p.length - 1]] = vals;
-        }
+        });
         (src.boolFields || []).forEach(f => {
             const on = !!document.getElementById(`cfg-src-${kn}-${f.fid}`)?.checked;
             const p = f.path;
@@ -1807,6 +1840,8 @@ function buildConfig() {
         audio: !!document.getElementById('cfg-ml-ir-audio')?.checked,
         video: !!document.getElementById('cfg-ml-ir-video')?.checked,
     };
+    cfg.remote = cfg.remote || {};
+    cfg.remote.handle_all = !!document.getElementById('cfg-remote-handle-all')?.checked;
     cfg.masterlink.provider = {
         nmusic_source: document.getElementById('cfg-ml-nmusic')?.value || '',
         nradio_source: document.getElementById('cfg-ml-nradio')?.value || '',

@@ -226,8 +226,14 @@ class MusicAssistantSource(SourceBase):
         follow. Everything is playable on GO — MA's play_media resolves any
         track/album/playlist/artist/radio URI."""
         folders = await self._client.call("music/recommendations")
+        # `music_assistant.discover_rows` (config UI: MUSIC card) selects
+        # which recommendation rows show; absent/empty = all of them.
+        selected = cfg("music_assistant", "discover_rows", default=None)
+        enabled = set(selected) if isinstance(selected, list) and selected else None
         items: list[dict] = []
         for folder in folders or []:
+            if enabled is not None and (folder.get("item_id") or "") not in enabled:
+                continue
             folder_items = folder.get("items") or []
             if not folder_items:
                 continue

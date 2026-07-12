@@ -117,6 +117,20 @@ def test_browse_discover_flattens_folders_with_headers(source):
     assert "uri" not in items[0] or not items[0].get("uri")
 
 
+def test_discover_rows_filtered_by_config(source, mock_config):
+    mock_config({"music_assistant": {"discover_rows": ["random_artists"]}})
+    source._client.responses["music/recommendations"] = [
+        {"item_id": "recently_played", "name": "Recently Played", "items": [
+            _media_item(1, "Song A", "track"),
+        ]},
+        {"item_id": "random_artists", "name": "Random Artists", "items": [
+            _media_item(3, "Some Artist", "artist"),
+        ]},
+    ]
+    result = _run(source._browse("discover"))
+    assert [i["name"] for i in result["items"]] == ["Random Artists", "Some Artist"]
+
+
 def test_discover_uses_top_level_image(source):
     """Recommendation items store artwork in a top-level `image` dict (not
     metadata.images); _image_of must fall back to it so covers show."""
