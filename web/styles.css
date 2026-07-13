@@ -794,14 +794,19 @@ html, body {
 
 
 /* Speaker grouping overlay (right side of PLAYING / screensaver).
-   Plain vertical list of speaker names — no arc, no artwork, no icons. */
+   Plain vertical list of speaker names — no arc, no artwork, no icons.
+   z-index must clear .canvas-panel (99989): during immersive mode the
+   Spotify Canvas / music-video background auto-fades in full-screen
+   (js/canvas-panel.js) a few seconds after entering immersive, and used to
+   render on top of this overlay — double-GO would open it (isOpen flips,
+   join/leave still worked) but it was invisible underneath the video. */
 #speaker-overlay {
   position: fixed;
   top: 0;
   right: 0;
   width: 440px;
   height: 768px;
-  z-index: 120;
+  z-index: 99991;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -919,14 +924,16 @@ html, body {
 }
 
 /* Playing Context Menu (hold-GO on PLAYING) — visual sibling of the
-   speaker overlay: same right-side placement clear of the volume wheel. */
+   speaker overlay: same right-side placement clear of the volume wheel.
+   Same z-index as #speaker-overlay, above .canvas-panel (99989) — see the
+   comment there for why. */
 #playing-context-menu {
   position: fixed;
   top: 0;
   right: 0;
   width: 440px;
   height: 768px;
-  z-index: 120;
+  z-index: 99991;
   display: flex;
   flex-direction: column;
   justify-content: center;
