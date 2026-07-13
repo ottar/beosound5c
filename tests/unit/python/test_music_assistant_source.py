@@ -64,7 +64,11 @@ class FakeMAClient:
 
 
 @pytest.fixture
-def source():
+def source(mock_config):
+    # Isolate from the device's live /etc config — _discover reads
+    # music_assistant.discover_rows from global cfg, and a saved live
+    # selection would otherwise filter out the tests' fake row ids.
+    mock_config({})
     s = MusicAssistantSource()
     s._client = FakeMAClient()
     s.register = AsyncMock()
