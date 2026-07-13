@@ -21,6 +21,7 @@ class MenuManager {
         const c = window.Constants || {};
         this.radius = c.arc?.radius || 1000;
         this.angleStep = c.arc?.menuAngleStep || 5;
+        this.topOverlayStart = c.overlays?.topOverlayStart ?? 160;
 
         // Home/Music submenu-mode state (set up in fetchMenu when the MA
         // preset exposes a submenu; null-safe when the mode is off).
@@ -373,9 +374,13 @@ class MenuManager {
     // ── Rendering ──
 
     getStartItemAngle() {
-        const visibleCount = this.menuItems.length;
-        const totalSpan = this.angleStep * (visibleCount - 1);
-        return 180 - totalSpan / 2;
+        // Top-anchored: the first (top-most) item sits just below the top
+        // overlay boundary and items grow DOWNWARD, so the top slot — the
+        // Home/Music toggle — is pinned at the very top of the arc
+        // regardless of item count (classic BeoSound 5, where MODE was
+        // always the top slot). Must match laser-position-mapper's
+        // getMenuStartAngle so hit-testing lines up with rendering.
+        return this.topOverlayStart + this.angleStep / 2;
     }
 
     _ensureHoverDelegation(menuContainer) {

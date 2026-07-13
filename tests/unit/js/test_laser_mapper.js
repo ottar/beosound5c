@@ -170,12 +170,13 @@ describe('resolveMenuSelection', () => {
 // --- getMenuStartAngle + getMenuItemAngle ---
 
 describe('menu angle geometry', () => {
-    it('menu is centered around 180 degrees', () => {
-        const items = LASER_MAPPING_CONFIG.MENU_ITEMS;
-        const step = LASER_MAPPING_CONFIG.MENU_ANGLE_STEP;
-        const start = getMenuStartAngle();
-        const center = start + step * (items.length - 1) / 2;
-        assert.equal(center, 180);
+    it('top item is pinned just below the top overlay boundary', () => {
+        // Top-anchored: the top-most item (highest index) sits at
+        // TOP_OVERLAY_START + step/2, independent of item count.
+        const { TOP_OVERLAY_START, MENU_ANGLE_STEP, MENU_ITEMS } = LASER_MAPPING_CONFIG;
+        const anchor = TOP_OVERLAY_START + MENU_ANGLE_STEP / 2;
+        assert.equal(getMenuStartAngle(), anchor);
+        assert.equal(getMenuItemAngle(MENU_ITEMS.length - 1), anchor);
     });
 
     it('item angles are monotonically decreasing with increasing index', () => {
@@ -187,16 +188,13 @@ describe('menu angle geometry', () => {
         }
     });
 
-    it('first and last item are equidistant from 180', () => {
-        const items = LASER_MAPPING_CONFIG.MENU_ITEMS;
-        const first = getMenuItemAngle(0);
-        const last = getMenuItemAngle(items.length - 1);
-        const distFirst = Math.abs(first - 180);
-        const distLast = Math.abs(last - 180);
-        assert.ok(
-            Math.abs(distFirst - distLast) < 0.01,
-            `First item ${first} and last item ${last} not equidistant from 180`
-        );
+    it('items grow downward from the pinned top anchor', () => {
+        // Bottom-most item (index 0) sits step*(count-1) below the top.
+        const { TOP_OVERLAY_START, MENU_ANGLE_STEP, MENU_ITEMS } = LASER_MAPPING_CONFIG;
+        const anchor = TOP_OVERLAY_START + MENU_ANGLE_STEP / 2;
+        const bottom = getMenuItemAngle(0);
+        assert.equal(bottom, anchor + MENU_ANGLE_STEP * (MENU_ITEMS.length - 1));
+        assert.ok(bottom > getMenuItemAngle(MENU_ITEMS.length - 1));
     });
 
     it('consecutive items are exactly MENU_ANGLE_STEP apart', () => {

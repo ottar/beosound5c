@@ -99,9 +99,11 @@ function laserPositionToAngle(position) {
  * @returns {number} Starting angle for first menu item
  */
 function getMenuStartAngle() {
-    const { MENU_ITEMS, MENU_ANGLE_STEP } = LASER_MAPPING_CONFIG;
-    const totalSpan = MENU_ANGLE_STEP * (MENU_ITEMS.length - 1);
-    return 180 - totalSpan / 2;
+    // Top-anchored (matches MenuManager.getStartItemAngle): the top-most
+    // item is pinned just below the top overlay boundary and items grow
+    // downward, so the top slot stays put as the item count changes.
+    const { TOP_OVERLAY_START, MENU_ANGLE_STEP } = LASER_MAPPING_CONFIG;
+    return TOP_OVERLAY_START + MENU_ANGLE_STEP / 2;
 }
 
 /**
