@@ -1305,6 +1305,22 @@ class ArcList {
             .forEach(el => existing.set(el.dataset.itemId, el));
         const used = new Set();
 
+        // Profiling on-device (a sustained fast flick, ~60 render() calls)
+        // showed the DOM writes below — not row creation itself — as the
+        // dominant per-frame cost: every one of the ~9 visible rows got an
+        // unconditional className rewrite, an !important opacity/filter
+        // write, and an appendChild reorder EVERY frame, even though those
+        // values are almost always already correct (selected/actionable
+        // status rarely flips frame-to-frame, opacity/filter are pinned to
+        // '1'/'none' once settled, and the sorted-by-relativePosition order
+        // is stable while the window slides ~1 item/frame). Each of those is
+        // a style-recalc/paint-order trigger regardless of whether the value
+        // actually changed, so skipping the no-op writes below is what
+        // removed the stutter — row/image creation is unavoidable and cheap
+        // by comparison (see 8bdcfbf's velocity gate for the actual image
+        // decode cost).
+        let prevEl = null;
+
         visibleItems.forEach(item => {
             const isSelected = Math.abs(item.index - this.currentIndex) < 0.5;
             // Container/page detection (stack effect for drill-down-able items)
@@ -1313,21 +1329,23 @@ class ArcList {
 
             let el = existing.get(item.id);
             if (el && used.has(el)) el = null;   // duplicate id in this frame
+            const isNew = !el;
             if (!el) {
                 el = document.createElement('div');
                 el.dataset.itemId = item.id;
             }
             used.add(el);
 
-            el.className = 'arc-item';
-            if (isSelected) el.classList.add('selected');
+            let className = 'arc-item';
+            if (isSelected) className += ' selected';
             // Section header row (e.g. Discover list titles) — styled distinctly
-            if (item.header) el.classList.add('arc-header');
+            if (item.header) className += ' arc-header';
             // Row with a small cover left of the text (Discover items)
-            if (item.cover) el.classList.add('arc-cover');
+            if (item.cover) className += ' arc-cover';
             // Actionable detection (blue highlight on GO-able items)
-            if (this.isActionable(item)) el.classList.add('actionable');
-            if (navigatable) el.classList.add('navigatable');
+            if (this.isActionable(item)) className += ' actionable';
+            if (navigatable) className += ' navigatable';
+            if (el.className !== className) el.className = className;
 
             if (el.dataset.sig !== sig) {
                 el.dataset.sig = sig;
@@ -1338,15 +1356,28 @@ class ArcList {
                 el.appendChild(this.createImageWrapper(item, navigatable));
             }
             const nameEl = el.firstChild;
-            nameEl.className = `item-name ${isSelected ? 'selected' : 'unselected'}`;
+            const nameClass = `item-name ${isSelected ? 'selected' : 'unselected'}`;
+            if (nameEl.className !== nameClass) nameEl.className = nameClass;
 
-            el.style.transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale})`;
-            el.style.setProperty('opacity', '1', 'important');
-            el.style.setProperty('filter', 'none', 'important');
+            const transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale})`;
+            if (el.style.transform !== transform) el.style.transform = transform;
+            if (el.style.opacity !== '1') el.style.setProperty('opacity', '1', 'important');
+            if (el.style.filter !== 'none') el.style.setProperty('filter', 'none', 'important');
 
-            // appendChild both inserts new rows and moves reused ones into
-            // paint order (moving a node does not reload its <img>).
-            this.container.appendChild(el);
+            // Only move the node in the DOM if it isn't already right after
+            // the previous item — insertBefore/appendChild is a paint-order
+            // mutation even when the element ends up in the same place, so
+            // skip it for the common case (order unchanged between frames).
+            // The pairwise chaining guarantees the surviving rows keep the
+            // correct relative (sorted) order among themselves; where the
+            // first row sits relative to breadcrumbs doesn't matter — those
+            // have an explicit z-index and always paint above regular rows.
+            if (prevEl) {
+                if (prevEl.nextSibling !== el) this.container.insertBefore(el, prevEl.nextSibling);
+            } else if (isNew) {
+                this.container.appendChild(el);
+            }
+            prevEl = el;
         });
 
         existing.forEach(el => { if (!used.has(el)) el.remove(); });
@@ -1369,12 +1400,13 @@ class ArcList {
             if (!item) return;
 
             el.classList.remove('playlist-enter', 'track-exit');
-            el.style.transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale})`;
-            el.style.setProperty('opacity', '1', 'important');
-            el.style.filter = 'none';
+            const transform = `translate(${item.x}px, ${item.y}px) scale(${item.scale})`;
+            if (el.style.transform !== transform) el.style.transform = transform;
+            if (el.style.opacity !== '1') el.style.setProperty('opacity', '1', 'important');
+            if (el.style.filter !== 'none') el.style.filter = 'none';
 
             const isSelected = Math.abs(item.index - this.currentIndex) < 0.5;
-            const nameEl = el.querySelector('.item-name');
+            const nameEl = el.firstChild;
 
             if (isSelected && !el.classList.contains('selected')) {
                 el.classList.add('selected');
