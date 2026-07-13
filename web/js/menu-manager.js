@@ -14,10 +14,20 @@
  */
 
 class MenuManager {
+    // Synthetic menu path for the Home/Music toggle slot (submenu mode).
+    static TOGGLE_PATH = '__music_toggle';
+
     constructor() {
         const c = window.Constants || {};
         this.radius = c.arc?.radius || 1000;
         this.angleStep = c.arc?.menuAngleStep || 5;
+
+        // Home/Music submenu-mode state (set up in fetchMenu when the MA
+        // preset exposes a submenu; null-safe when the mode is off).
+        this._musicSubmenu = null;      // { items:[…categories] }
+        this._musicMenuActive = false;  // true while the music menu is shown
+        this._rootMenuItems = null;     // saved root list while in music menu
+        this._pointerPath = null;       // menu path currently under the laser
 
         // Menu items from centralized constants (static views only — sources/webpages added by router)
         this.menuItems = (c.menuItems || [
@@ -128,25 +138,28 @@ class MenuManager {
                     }
                     const preset = window.SourcePresets?.[item.preset];
                     if (preset?.submenu || preset?.categories?.length) {
-                        // Submenu-mode root entry (MA's single MUSIC item):
-                        // laser-selecting it swaps the left menu to its items
-                        // (see enterSubmenu). Views registered up front so
-                        // the routes work as soon as the submenu opens.
+                        // Submenu mode (MA): the root gets a single Home/Music
+                        // TOGGLE slot at the very top; GO on it swaps the whole
+                        // left menu to the library views (toggleMusicMenu).
+                        // Hovering it only previews, so pointer motion can
+                        // never trigger a swap. The category views are
+                        // registered up front so their routes work the moment
+                        // the music menu opens.
                         if (preset.submenu) {
                             for (const cat of preset.submenu.items) {
                                 this.views[cat.path] = cat.view || preset.view;
                                 window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
                             }
-                            newItems.push({
-                                title: preset.submenu.title,
-                                path: preset.submenu.path,
-                                dynamic: true,
-                                submenuItems: preset.submenu.items,
-                            });
+                            this._musicSubmenu = { items: preset.submenu.items };
+                            this.views[MenuManager.TOGGLE_PATH] = {
+                                title: 'MUSIC',
+                                content: MenuManager._togglePreviewHtml('music'),
+                            };
+                            this._pendingToggle = { title: 'MUSIC', path: MenuManager.TOGGLE_PATH, dynamic: true };
                         }
                         // Source exposes its browse categories as separate
-                        // left-menu views (MA: DISCOVER/ARTISTS/ALBUMS/…), all
-                        // sharing the one preloaded iframe.
+                        // left-menu views (MA: DISCOVER/ALBUMS/… or, in submenu
+                        // mode, just RADIO which stays on the root menu).
                         for (const cat of preset.categories || []) {
                             newItems.push({ title: cat.title, path: cat.path, dynamic: true });
                             this.views[cat.path] = cat.view || preset.view;
@@ -165,8 +178,19 @@ class MenuManager {
                     newItems.push(existing || { title: item.title, path });
                 }
             }
+            // Submenu mode: pin the toggle to the very top (array end) with
+            // PLAYING directly under it — classic BeoSound 5 order (the top
+            // MODE slot became Home/Music). Array order is bottom→top.
+            if (this._pendingToggle) {
+                const pi = newItems.findIndex(m => m.path === 'menu/playing');
+                const playing = pi >= 0 ? newItems.splice(pi, 1)[0]
+                                        : { title: 'PLAYING', path: 'menu/playing' };
+                newItems.push(playing, this._pendingToggle);
+                this._pendingToggle = null;
+            }
             this.menuItems = newItems;
-            this._rootMenuItems = null;   // a menu rebuild always exits any open submenu
+            this._musicMenuActive = false;
+            this._rootMenuItems = null;   // a menu rebuild always exits the music menu
 
             // Sync to laser position mapper
             if (window.LaserPositionMapper?.updateMenuItems) {
@@ -373,108 +397,103 @@ class MenuManager {
 
     // ── Submenu (single MUSIC entry swaps the left menu) ──
 
-    /** Laser landed on `path` — swap or restore the menu if it's a submenu
-     *  trigger / the BACK entry. Returns true when the menu changed (the
-     *  caller must then skip view navigation for this event). */
-    handleMenuTrigger(path) {
-        if (path === '__submenu_back') return this.exitSubmenu();
-        const item = this.menuItems.find(m => m.path === path);
-        if (item?.submenuItems?.length) return this.enterSubmenu(item);
-        return false;
-    }
+    /** True while the laser rests on the Home/Music toggle — hardware-input
+     *  routes a GO press here to toggle instead of acting on the view. */
+    get pointerOnToggle() { return this._pointerPath === MenuManager.TOGGLE_PATH; }
 
-    enterSubmenu(item) {
-        if (this._rootMenuItems) return false;   // already inside one
-        this._rootMenuItems = this.menuItems;
-        this.menuItems = [
-            { title: '‹ BACK', path: '__submenu_back' },
-            ...item.submenuItems.map(c => ({ title: c.title, path: c.path, dynamic: true })),
+    /** Build the music-menu item list (array order is bottom→top, so the
+     *  toggle ends up at the very top and PLAYING directly under it):
+     *  [ …categories reversed…, PLAYING, HOME-toggle ]. */
+    _musicMenuItems() {
+        const cats = (this._musicSubmenu?.items || [])
+            .map(c => ({ title: c.title, path: c.path, dynamic: true }))
+            .reverse();
+        return [
+            ...cats,
+            { title: 'PLAYING', path: 'menu/playing' },
+            { title: 'HOME', path: MenuManager.TOGGLE_PATH, dynamic: true },
         ];
-        this._armSwapGuard();
+    }
+
+    /** GO on the toggle swaps between the root menu and the music menu.
+     *  Hovering the toggle only previews (normal navigation to its view),
+     *  so a swap can never be triggered by pointer motion — that is what
+     *  killed the old enter↔exit oscillation. */
+    toggleMusicMenu() {
+        if (!this._musicSubmenu) return false;
+        if (this._musicMenuActive) {
+            this.menuItems = this._rootMenuItems || this.menuItems;
+            this._rootMenuItems = null;
+            this._musicMenuActive = false;
+            this._setToggleTitle('MUSIC');
+            console.log('[MENU] Toggle → Home');
+        } else {
+            this._rootMenuItems = this.menuItems;
+            this.menuItems = this._musicMenuItems();
+            this._musicMenuActive = true;
+            this._setToggleTitle('HOME');
+            console.log('[MENU] Toggle → Music');
+        }
         window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
         this.renderMenuItems();
-        console.log(`[MENU] Entered submenu: ${item.title}`);
         return true;
     }
 
-    exitSubmenu() {
-        if (!this._rootMenuItems) return false;
-        this.menuItems = this._rootMenuItems;
-        this._rootMenuItems = null;
-        this._armSwapGuard();
+    /** Runtime install of the Home/Music toggle (used when the MA source
+     *  registers after initial load). Pins the toggle to the top with
+     *  PLAYING under it; idempotent. fetchMenu does the same inline when it
+     *  rebuilds the whole menu. */
+    installMusicToggle(submenu) {
+        this._musicSubmenu = { items: submenu.items };
+        this.views[MenuManager.TOGGLE_PATH] = {
+            title: 'MUSIC', content: MenuManager._togglePreviewHtml('music'),
+        };
+        if (this._musicMenuActive) {   // fold any open music menu back to root
+            this.menuItems = this._rootMenuItems || this.menuItems;
+            this._rootMenuItems = null;
+            this._musicMenuActive = false;
+        }
+        this.menuItems = this.menuItems.filter(m => m.path !== MenuManager.TOGGLE_PATH);
+        const pi = this.menuItems.findIndex(m => m.path === 'menu/playing');
+        const playing = pi >= 0 ? this.menuItems.splice(pi, 1)[0]
+                                : { title: 'PLAYING', path: 'menu/playing' };
+        this.menuItems.push(playing, { title: 'MUSIC', path: MenuManager.TOGGLE_PATH, dynamic: true });
         window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
         this.renderMenuItems();
-        console.log('[MENU] Exited submenu');
-        return true;
     }
 
-    // Swapping the menu changes every item's angle, so whatever slides in
-    // under the stationary laser must not activate — with the root's MUSIC
-    // and the submenu's '‹ BACK' at overlapping angles that instantly
-    // re-toggled the swap, trapping the user (enter↔exit oscillation).
-    _armSwapGuard() {
-        this._swapGuardArmed = true;
-        this._swapGuardPath = null;
-        this._cancelTriggerHover();
+    /** Runtime removal of the toggle (MA source unregistered). */
+    uninstallMusicToggle() {
+        if (this._musicMenuActive) {
+            this.menuItems = this._rootMenuItems || this.menuItems;
+            this._rootMenuItems = null;
+            this._musicMenuActive = false;
+        }
+        this.menuItems = this.menuItems.filter(m => m.path !== MenuManager.TOGGLE_PATH);
+        this._musicSubmenu = null;
+        delete this.views[MenuManager.TOGGLE_PATH];
+        window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
+        this.renderMenuItems();
     }
 
-    // ── Dwell-to-activate for swap triggers ──
-    //
-    // Landing-activation is right for view navigation (cheap, transient)
-    // but wrong for menu swaps: the pointer inevitably CROSSES the MUSIC
-    // slot while traversing the root list, and a crossing must not swap
-    // the menu. Triggers therefore fire only after the pointer RESTS on
-    // them for TRIGGER_DWELL_MS. Timer-based, not event-based: the laser
-    // stream goes silent when the hand is still, so the dwell must
-    // complete without further events.
-    TRIGGER_DWELL_MS = 400;
-
-    _cancelTriggerHover() {
-        if (this._hoverTimer) { clearTimeout(this._hoverTimer); this._hoverTimer = null; }
-        this._hoverPath = null;
+    _setToggleTitle(title) {
+        const t = this.menuItems.find(m => m.path === MenuManager.TOGGLE_PATH);
+        if (t) t.title = title;
+        const v = this.views[MenuManager.TOGGLE_PATH];
+        if (v) v.content = MenuManager._togglePreviewHtml(title === 'HOME' ? 'home' : 'music');
     }
 
-    /** Called per wheel/laser event with the resolved menu path. Returns
-     *  true when the path is a swap trigger (MUSIC / '‹ BACK') — the
-     *  caller must then skip navigation; the swap itself fires from the
-     *  dwell timer once the pointer has rested on it. */
-    updateTriggerHover(path) {
-        const item = this.menuItems.find(m => m.path === path);
-        const isTrigger = path === '__submenu_back' || !!item?.submenuItems?.length;
-        if (!isTrigger) {
-            this._cancelTriggerHover();
-            return false;
-        }
-        if (this._hoverPath !== path) {
-            this._cancelTriggerHover();
-            this._hoverPath = path;
-            this._hoverTimer = setTimeout(() => {
-                this._hoverTimer = null;
-                const p = this._hoverPath;
-                this._hoverPath = null;
-                if (p && this.handleMenuTrigger(p)) {
-                    window.uiStore?.sendClickCommand?.();
-                }
-            }, this.TRIGGER_DWELL_MS);
-        }
-        return true;
-    }
-
-    /** Called per wheel/laser event with the resolved menu path. Returns
-     *  true while the selection under the pointer must be ignored: the
-     *  first event after a swap adopts that item as "guarded", and it stays
-     *  guarded until the pointer moves to a different item. */
-    consumeSwapGuard(path) {
-        if (this._swapGuardArmed) {
-            this._swapGuardArmed = false;
-            this._swapGuardPath = path;
-            return true;
-        }
-        if (this._swapGuardPath) {
-            if (path === this._swapGuardPath) return true;   // still resting on it
-            this._swapGuardPath = null;                      // moved away — disarm
-        }
-        return false;
+    /** Preview shown in the content area while the laser rests on the
+     *  toggle: a big glyph for the destination view with a GO hint. */
+    static _togglePreviewHtml(dest) {
+        const icon = dest === 'home' ? 'house' : 'vinyl-record';
+        const label = dest === 'home' ? 'HOME' : 'MUSIC';
+        return `<div style="position:absolute;inset:0;display:flex;flex-direction:column;
+            align-items:center;justify-content:center;color:#fff;gap:24px">
+            <i class="ph ph-${icon}" style="font-size:180px;opacity:0.9"></i>
+            <div style="font-size:22px;letter-spacing:0.12em;opacity:0.6">${label}</div>
+            <div style="font-size:13px;letter-spacing:0.1em;opacity:0.3">PRESS GO TO SWITCH</div>
+        </div>`;
     }
 
     renderMenuItems() {
@@ -543,9 +562,7 @@ class MenuManager {
 
         const afterIndex = this.menuItems.findIndex(m => m.path === afterPath);
         const insertAt = afterIndex !== -1 ? afterIndex + 1 : this.menuItems.length;
-        const entry = { title: item.title, path: item.path, dynamic: true };
-        if (item.submenuItems) entry.submenuItems = item.submenuItems;
-        this.menuItems.splice(insertAt, 0, entry);
+        this.menuItems.splice(insertAt, 0, { title: item.title, path: item.path, dynamic: true });
 
         if (viewDef) {
             this.views[item.path] = viewDef;

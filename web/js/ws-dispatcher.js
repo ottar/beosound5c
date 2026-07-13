@@ -270,26 +270,21 @@ async function handleMenuItemEvent(uiStore, data) {
         if (preset) {
             if (preset.submenu || preset.categories?.length) {
                 let after = preset.after;
-                // Submenu-mode root entry (MA's single MUSIC item) — its
-                // item views are registered directly on the MenuManager
-                // since they are opened via the submenu, not the root arc.
-                if (preset.submenu) {
-                    for (const cat of preset.submenu.items) {
-                        uiStore.menu.views[cat.path] = cat.view || preset.view;
-                        window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
-                    }
-                    uiStore.addMenuItem(
-                        { title: preset.submenu.title, path: preset.submenu.path,
-                          submenuItems: preset.submenu.items },
-                        after, preset.view);
-                    after = preset.submenu.path;
-                }
                 // Expand root categories (MA: RADIO in submenu mode, all
                 // views otherwise) into one menu entry per view.
                 for (const cat of preset.categories || []) {
                     uiStore.addMenuItem({ title: cat.title, path: cat.path }, after, cat.view);
                     window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
                     after = cat.path;
+                }
+                // Submenu mode: register the library views + pin the
+                // Home/Music toggle to the top (see MenuManager toggle).
+                if (preset.submenu) {
+                    for (const cat of preset.submenu.items) {
+                        uiStore.menu.views[cat.path] = cat.view || preset.view;
+                        window.IframeMessenger?.registerIframe(cat.path, preset.view.preloadId);
+                    }
+                    uiStore.menu.installMusicToggle(preset.submenu);
                 }
             } else {
                 const item = data.title ? { ...preset.item, title: data.title } : preset.item;
@@ -316,16 +311,15 @@ async function handleMenuItemEvent(uiStore, data) {
     } else if (action === 'remove') {
         const preset = data.preset && window.SourcePresets?.[data.preset];
         if (preset?.submenu || preset?.categories?.length) {
-            // Close an open submenu first so the root list is restored
-            // before its trigger entry disappears.
+            // Tear down the Home/Music toggle (folds an open music menu back
+            // to root first) before its library routes disappear.
             if (preset.submenu) {
-                uiStore.menu.exitSubmenu?.();
                 const onSubmenuRoute = preset.submenu.items
                     .some(cat => uiStore.currentRoute === cat.path);
                 if (onSubmenuRoute && uiStore.navigateToView) {
                     uiStore.navigateToView('menu/playing');
                 }
-                uiStore.removeMenuItem(preset.submenu.path);
+                uiStore.menu.uninstallMusicToggle?.();
             }
             // Remove every root category entry for this source.
             for (const cat of preset.categories || []) {

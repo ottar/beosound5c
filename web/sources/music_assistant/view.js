@@ -137,8 +137,8 @@ window.SourcePresets.music_assistant = {
         view: _maCategoryView(cat),
     })),
 
-    // Submenu-mode root entry: MenuManager swaps the left menu to these
-    // items when the laser lands on MUSIC ('‹ BACK' restores the root).
+    // Submenu-mode library views behind the top Home/Music toggle
+    // (MenuManager pins a MUSIC/HOME toggle at the top; GO swaps to these).
     submenu: (() => {
         if (!MA_SUBMENU_MODE) return null;
         const items = MA_CATEGORIES.filter(c => c.section !== 'radios')
@@ -148,7 +148,7 @@ window.SourcePresets.music_assistant = {
                 section: cat.section,
                 view: _maCategoryView(cat),
             }));
-        return items.length ? { title: 'MUSIC', path: 'menu/ma_submenu', items } : null;
+        return items.length ? { items } : null;
     })(),
 
     onAdd() {},

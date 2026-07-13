@@ -423,6 +423,17 @@ function handleButtonEvent(uiStore, data) {
         return;
     }
 
+    // Home/Music toggle: while the laser rests on the top toggle slot, a
+    // short GO swaps the menu (root ↔ music library) instead of acting on
+    // the view. This is the ONLY way to swap — hovering the slot merely
+    // previews — so the menu can never oscillate from pointer motion.
+    // go_down is swallowed too so it doesn't arm the hold-GO context menu.
+    const menu = uiStore?.menu;
+    if (menu?.pointerOnToggle) {
+        if (button === 'go') { menu.toggleMusicMenu(); uiStore.sendClickCommand?.(); return; }
+        if (button === 'go_down' || button === 'go_long') return;
+    }
+
     // GO press edge — arms the hold-GO context menu. Always consumed (never
     // dispatched or webhooked). A no-op while an overlay owns GO.
     if (button === 'go_down') {

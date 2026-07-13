@@ -203,19 +203,14 @@ class UIStore {
             this.view.setMenuVisible(true);
         }
 
-        // Navigate when the effective path differs. Submenu triggers
-        // (MUSIC in submenu mode, and its '‹ BACK') swap the left menu —
-        // but only after the pointer RESTS on them (updateTriggerHover's
-        // dwell timer): crossing them while traversing must do nothing,
-        // otherwise BACK↔MUSIC at overlapping angles re-trigger forever.
-        // consumeSwapGuard additionally keeps the item that slides in
-        // under the stationary laser inert right after a swap. Overlay
-        // zones (PLAYING/SHOWING at the arc ends) bypass both.
-        if (!result.isOverlay && this.menu.consumeSwapGuard?.(effectivePath)) {
-            // guarded — highlight still follows the pointer below
-        } else if (this.menu.updateTriggerHover?.(effectivePath)) {
-            // trigger under pointer — dwell timer owns the swap
-        } else if (effectivePath && effectivePath !== this.view.currentRoute) {
+        // Track the menu item under the laser so a GO press on the
+        // Home/Music toggle (hardware-input) can swap the menu. The toggle
+        // itself navigates to its preview view like any item — hovering it
+        // never swaps, so pointer motion can't oscillate the menu.
+        this.menu._pointerPath = result.isOverlay ? null : result.path;
+
+        // Navigate when the effective path differs
+        if (effectivePath && effectivePath !== this.view.currentRoute) {
             this.view.navigateToView(effectivePath);
             this.menu._currentRoute = this.view.currentRoute;
         }
