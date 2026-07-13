@@ -90,8 +90,8 @@ body {
     min-width: 0; /* Allow text to shrink */
     padding-right: 0; /* Remove padding since gap handles spacing */
     transition: all 75ms ease-out;
-    /* Base font size and color for ALL items */
-    font-size: 0.875rem !important;
+    /* Base font size and color for ALL items default 0.875 */
+    font-size: 1rem !important;
     color: white; /* Always full bright white */
     font-weight: normal;
     /* Single line — long titles get an ellipsis instead of wrapping */
