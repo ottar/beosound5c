@@ -70,6 +70,7 @@ def source():
     s.register = AsyncMock()
     s.post_media_update = AsyncMock()
     s.player_play = AsyncMock(return_value=True)
+    s.player_set_shuffle = AsyncMock(return_value=True)
     s.player_pause = AsyncMock(return_value=True)
     s.player_resume = AsyncMock(return_value=True)
     s.player_next = AsyncMock(return_value=True)
@@ -214,6 +215,48 @@ def test_browse_radios_flagged_radio(source):
     ]
     result = _run(source._browse("radios"))
     assert result["items"][0]["radio"] is True
+
+
+# ── Playlist dedupe ──
+# Live MA server observation (2026-07-12): Apple Music reissues catalog ids
+# for its curated "... essentials" playlists, and MA's library sync adds a
+# second library row for the reissued id instead of updating the original —
+# 79 of 219 playlists were duplicated this way, both rows provider="library"
+# with different item_ids. See MusicAssistantSource._dedupe_by_name.
+
+def test_browse_playlists_dedupes_same_name_by_lowest_item_id(source):
+    source._client.responses["music/playlists/library_items"] = [
+        _media_item(132, "'70s singer-songwriter essentials", "playlist"),
+        _media_item(213, "'70s singer-songwriter essentials", "playlist"),
+        _media_item(4, "500 Random tracks", "playlist"),
+    ]
+    result = _run(source._browse("playlists"))
+    names = [i["name"] for i in result["items"]]
+    assert names.count("'70s singer-songwriter essentials") == 1
+    ids = [i["id"] for i in result["items"]]
+    assert "132" in ids and "213" not in ids
+
+
+def test_browse_playlists_dedupe_is_case_insensitive_and_order_preserving(source):
+    source._client.responses["music/playlists/library_items"] = [
+        _media_item(1, "Chill", "playlist"),
+        _media_item(2, "chill", "playlist"),
+        _media_item(3, "Barnesanger", "playlist"),
+    ]
+    result = _run(source._browse("playlists"))
+    ids = [i["id"] for i in result["items"]]
+    # First-seen name kept at its original position; the reissue (id 2) dropped.
+    assert ids == ["1", "3"]
+
+
+def test_dedupe_by_name_keeps_non_numeric_item_ids_safely():
+    items = [
+        {"item_id": "abc", "name": "Weird"},
+        {"item_id": "def", "name": "weird"},
+    ]
+    result = MusicAssistantSource._dedupe_by_name(items)
+    assert len(result) == 1
+    assert result[0]["item_id"] == "abc"  # non-numeric → first wins, no crash
 
 
 # ── Playback ──
@@ -405,6 +448,50 @@ def test_play_item_replace_still_expands_artist(source):
         "uri": "library://artist/9", "name": "Artist"}))
     kwargs = source.player_play.await_args.kwargs
     assert kwargs["track_uris"] == ["library://track/1", "library://track/2"]
+
+
+# ── play_item shuffle (context-menu "Shuffle play") ──
+
+def test_play_item_shuffle_enables_shuffle_after_play(source):
+    res = _run(source.handle_command("play_item", {
+        "uri": "library://album/10", "name": "Alb",
+        "option": "replace", "shuffle": True}))
+    assert res["status"] == "ok"
+    source.player_play.assert_awaited_once()
+    source.player_set_shuffle.assert_awaited_once_with(True)
+
+
+def test_play_item_without_shuffle_flag_leaves_shuffle_untouched(source):
+    _run(source.handle_command("play_item", {
+        "uri": "library://album/10", "name": "Alb", "option": "replace"}))
+    source.player_set_shuffle.assert_not_awaited()
+
+
+def test_play_item_shuffle_not_applied_on_enqueue_variants(source):
+    """Shuffle only makes sense when a fresh queue actually starts — the
+    next/add enqueue variants return before the shuffle flag is consulted."""
+    _run(source.handle_command("play_item", {
+        "uri": "library://track/1", "name": "T",
+        "option": "add", "shuffle": True}))
+    source.player_set_shuffle.assert_not_awaited()
+
+
+def test_play_item_shuffle_failure_does_not_fail_play(source):
+    """A player that rejects /player/shuffle still leaves the item playing —
+    shuffle is best-effort, not a precondition for playback."""
+    source.player_set_shuffle = AsyncMock(return_value=False)
+    res = _run(source.handle_command("play_item", {
+        "uri": "library://album/10", "name": "Alb",
+        "option": "replace", "shuffle": True}))
+    assert res["status"] == "ok"
+
+
+def test_play_item_shuffle_skipped_when_play_fails(source):
+    source.player_play = AsyncMock(return_value=False)
+    _run(source.handle_command("play_item", {
+        "uri": "library://album/10", "name": "Alb",
+        "option": "replace", "shuffle": True}))
+    source.player_set_shuffle.assert_not_awaited()
 
 
 # ── favorites / library commands ──

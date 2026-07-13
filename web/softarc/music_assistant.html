@@ -186,6 +186,15 @@
                     run: () => play({ radio_mode: true, parent_uri: '' }) });
             }
 
+            // Shuffle: replaces the queue with the whole container (same as
+            // "Play"/"Play from here") and turns queue shuffle on. Only
+            // meaningful for multi-track containers, not single tracks/radio.
+            if (isAlbum || isPlaylist || isArtist) {
+                actions.push({ id: 'shuffle', name: 'Shuffle play', icon: 'shuffle',
+                    color: '#FDCB6E',
+                    run: () => play({ option: 'replace', shuffle: true }) });
+            }
+
             if ((isTrack || isAlbum) && item._maArtistUri) {
                 actions.push({ id: 'goto_artist', name: 'Go to artist',
                     icon: 'microphone-stage', color: '#FD79A8',

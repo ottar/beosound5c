@@ -158,7 +158,7 @@ class MusicAssistantSource(SourceBase):
 
         if category == "playlists":
             if item_id is None:
-                items = await self._library("playlists")
+                items = self._dedupe_by_name(await self._library("playlists"))
                 return self._listing("Playlists", "playlists", "", [
                     self._container_item(i, f"playlists/{i['item_id']}", cover=True)
                     for i in items])
@@ -318,6 +318,37 @@ class MusicAssistantSource(SourceBase):
         return sorted(items or [], key=lambda i: (i.get("sort_name")
                                                   or i.get("name", "")).lower())
 
+    @staticmethod
+    def _dedupe_by_name(items: list) -> list:
+        """Collapse library rows that share a case-folded name.
+
+        Observed live on the MA server (10.0.0.10): Apple Music periodically
+        reissues catalog ids for its curated "<Genre/Artist> essentials"
+        playlists (old "pl.<hex>" ids replaced by new "p.<token>" ids). MA's
+        library sync adds a *second* library://playlist/<id> row for the
+        reissued id instead of updating the existing one, so the same title
+        shows twice in PLAYLISTS (e.g. item_id 132 and 213, both "'70s
+        singer-songwriter essentials" — 79 of 219 playlists were duplicated
+        this way). Both rows are genuinely provider="library", so provider
+        can't disambiguate; item_id can, since it's assigned in add order —
+        keep the lowest (the original entry, still fully playable) and drop
+        the reissue's duplicate row. Order of first appearance is preserved.
+        """
+        seen: dict[str, dict] = {}
+        for it in items:
+            key = (it.get("name") or "").strip().lower()
+            prev = seen.get(key)
+            if prev is None:
+                seen[key] = it
+                continue
+            try:
+                keep_new = int(it.get("item_id")) < int(prev.get("item_id"))
+            except (TypeError, ValueError):
+                keep_new = False
+            if keep_new:
+                seen[key] = it
+        return list(seen.values())
+
     def _listing(self, name, path, parent, items) -> dict:
         return {"path": path, "parent": parent, "name": name, "items": items}
 
@@ -459,6 +490,11 @@ class MusicAssistantSource(SourceBase):
         if option not in ("play", "next", "add", "replace"):
             option = "replace"
         radio_mode = bool(data.get("radio_mode"))
+        # Context-menu "Shuffle play" action: turn on queue shuffle once the
+        # new queue is playing. Only meaningful when a fresh queue actually
+        # starts (play/replace below) — enqueue variants (next/add) and the
+        # dynamic-radio path return earlier and never consult this.
+        shuffle = bool(data.get("shuffle"))
 
         self._current = {"uri": uri, "parent_uri": parent_uri, "name": title,
                          "subtitle": artist, "radio": radio,
@@ -537,6 +573,13 @@ class MusicAssistantSource(SourceBase):
         )
         if ok:
             self._playing_state = "playing"
+            if shuffle:
+                # Best-effort: the queue is already playing at this point, so
+                # a failed/unsupported shuffle call shouldn't fail the whole
+                # play_item — the item is playing either way, just not shuffled.
+                if not await self.player_set_shuffle(True):
+                    log.warning("Shuffle-on-play requested but player "
+                                "rejected /player/shuffle for %s", uri)
             return {"status": "ok"}
         log.error("Player failed to start %s", uri)
         self._playing_state = "stopped"
