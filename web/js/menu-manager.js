@@ -390,6 +390,7 @@ class MenuManager {
             { title: '‹ BACK', path: '__submenu_back' },
             ...item.submenuItems.map(c => ({ title: c.title, path: c.path, dynamic: true })),
         ];
+        this._armSwapGuard();
         window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
         this.renderMenuItems();
         console.log(`[MENU] Entered submenu: ${item.title}`);
@@ -400,10 +401,37 @@ class MenuManager {
         if (!this._rootMenuItems) return false;
         this.menuItems = this._rootMenuItems;
         this._rootMenuItems = null;
+        this._armSwapGuard();
         window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
         this.renderMenuItems();
         console.log('[MENU] Exited submenu');
         return true;
+    }
+
+    // Swapping the menu changes every item's angle, so whatever slides in
+    // under the stationary laser must not activate — with the root's MUSIC
+    // and the submenu's '‹ BACK' at overlapping angles that instantly
+    // re-toggled the swap, trapping the user (enter↔exit oscillation).
+    _armSwapGuard() {
+        this._swapGuardArmed = true;
+        this._swapGuardPath = null;
+    }
+
+    /** Called per wheel/laser event with the resolved menu path. Returns
+     *  true while the selection under the pointer must be ignored: the
+     *  first event after a swap adopts that item as "guarded", and it stays
+     *  guarded until the pointer moves to a different item. */
+    consumeSwapGuard(path) {
+        if (this._swapGuardArmed) {
+            this._swapGuardArmed = false;
+            this._swapGuardPath = path;
+            return true;
+        }
+        if (this._swapGuardPath) {
+            if (path === this._swapGuardPath) return true;   // still resting on it
+            this._swapGuardPath = null;                      // moved away — disarm
+        }
+        return false;
     }
 
     renderMenuItems() {
