@@ -415,6 +415,49 @@ class MenuManager {
     _armSwapGuard() {
         this._swapGuardArmed = true;
         this._swapGuardPath = null;
+        this._cancelTriggerHover();
+    }
+
+    // ── Dwell-to-activate for swap triggers ──
+    //
+    // Landing-activation is right for view navigation (cheap, transient)
+    // but wrong for menu swaps: the pointer inevitably CROSSES the MUSIC
+    // slot while traversing the root list, and a crossing must not swap
+    // the menu. Triggers therefore fire only after the pointer RESTS on
+    // them for TRIGGER_DWELL_MS. Timer-based, not event-based: the laser
+    // stream goes silent when the hand is still, so the dwell must
+    // complete without further events.
+    TRIGGER_DWELL_MS = 400;
+
+    _cancelTriggerHover() {
+        if (this._hoverTimer) { clearTimeout(this._hoverTimer); this._hoverTimer = null; }
+        this._hoverPath = null;
+    }
+
+    /** Called per wheel/laser event with the resolved menu path. Returns
+     *  true when the path is a swap trigger (MUSIC / '‹ BACK') — the
+     *  caller must then skip navigation; the swap itself fires from the
+     *  dwell timer once the pointer has rested on it. */
+    updateTriggerHover(path) {
+        const item = this.menuItems.find(m => m.path === path);
+        const isTrigger = path === '__submenu_back' || !!item?.submenuItems?.length;
+        if (!isTrigger) {
+            this._cancelTriggerHover();
+            return false;
+        }
+        if (this._hoverPath !== path) {
+            this._cancelTriggerHover();
+            this._hoverPath = path;
+            this._hoverTimer = setTimeout(() => {
+                this._hoverTimer = null;
+                const p = this._hoverPath;
+                this._hoverPath = null;
+                if (p && this.handleMenuTrigger(p)) {
+                    window.uiStore?.sendClickCommand?.();
+                }
+            }, this.TRIGGER_DWELL_MS);
+        }
+        return true;
     }
 
     /** Called per wheel/laser event with the resolved menu path. Returns

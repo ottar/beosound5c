@@ -204,21 +204,20 @@ class UIStore {
         }
 
         // Navigate when the effective path differs. Submenu triggers
-        // (MUSIC in submenu mode, and its '‹ BACK') swap the left menu in
-        // place instead of navigating. After a swap, the item that slid in
-        // under the stationary laser is guarded (consumeSwapGuard) until
-        // the pointer moves to another item — without this, BACK and MUSIC
-        // at overlapping angles re-trigger each other forever. Overlay
-        // zones (PLAYING/SHOWING at the arc ends) bypass the guard.
+        // (MUSIC in submenu mode, and its '‹ BACK') swap the left menu —
+        // but only after the pointer RESTS on them (updateTriggerHover's
+        // dwell timer): crossing them while traversing must do nothing,
+        // otherwise BACK↔MUSIC at overlapping angles re-trigger forever.
+        // consumeSwapGuard additionally keeps the item that slides in
+        // under the stationary laser inert right after a swap. Overlay
+        // zones (PLAYING/SHOWING at the arc ends) bypass both.
         if (!result.isOverlay && this.menu.consumeSwapGuard?.(effectivePath)) {
             // guarded — highlight still follows the pointer below
+        } else if (this.menu.updateTriggerHover?.(effectivePath)) {
+            // trigger under pointer — dwell timer owns the swap
         } else if (effectivePath && effectivePath !== this.view.currentRoute) {
-            if (this.menu.handleMenuTrigger?.(effectivePath)) {
-                this.sendClickCommand();
-            } else {
-                this.view.navigateToView(effectivePath);
-                this.menu._currentRoute = this.view.currentRoute;
-            }
+            this.view.navigateToView(effectivePath);
+            this.menu._currentRoute = this.view.currentRoute;
         }
 
         // Bold + click (only for non-overlay menu items)
