@@ -170,13 +170,12 @@ describe('resolveMenuSelection', () => {
 // --- getMenuStartAngle + getMenuItemAngle ---
 
 describe('menu angle geometry', () => {
-    it('top item is pinned just below the top overlay boundary', () => {
-        // Top-anchored: the top-most item (highest index) sits at
-        // TOP_OVERLAY_START + step/2, independent of item count.
-        const { TOP_OVERLAY_START, MENU_ANGLE_STEP, MENU_ITEMS } = LASER_MAPPING_CONFIG;
-        const anchor = TOP_OVERLAY_START + MENU_ANGLE_STEP / 2;
-        assert.equal(getMenuStartAngle(), anchor);
-        assert.equal(getMenuItemAngle(MENU_ITEMS.length - 1), anchor);
+    it('top item (index 0) is pinned just below the playing overlay', () => {
+        // Screen-top = largest angle = index 0 (y = cy + r·sin). It sits at
+        // BOTTOM_OVERLAY_START - step/2, independent of item count.
+        const { BOTTOM_OVERLAY_START, MENU_ANGLE_STEP } = LASER_MAPPING_CONFIG;
+        const anchor = BOTTOM_OVERLAY_START - MENU_ANGLE_STEP / 2;
+        assert.equal(getMenuItemAngle(0), anchor);
     });
 
     it('item angles are monotonically decreasing with increasing index', () => {
@@ -189,12 +188,13 @@ describe('menu angle geometry', () => {
     });
 
     it('items grow downward from the pinned top anchor', () => {
-        // Bottom-most item (index 0) sits step*(count-1) below the top.
-        const { TOP_OVERLAY_START, MENU_ANGLE_STEP, MENU_ITEMS } = LASER_MAPPING_CONFIG;
-        const anchor = TOP_OVERLAY_START + MENU_ANGLE_STEP / 2;
-        const bottom = getMenuItemAngle(0);
-        assert.equal(bottom, anchor + MENU_ANGLE_STEP * (MENU_ITEMS.length - 1));
-        assert.ok(bottom > getMenuItemAngle(MENU_ITEMS.length - 1));
+        // Bottom-most item (highest index, smallest angle) sits
+        // step*(count-1) below the pinned top item (index 0).
+        const { BOTTOM_OVERLAY_START, MENU_ANGLE_STEP, MENU_ITEMS } = LASER_MAPPING_CONFIG;
+        const top = BOTTOM_OVERLAY_START - MENU_ANGLE_STEP / 2;
+        const bottom = getMenuItemAngle(MENU_ITEMS.length - 1);
+        assert.equal(bottom, top - MENU_ANGLE_STEP * (MENU_ITEMS.length - 1));
+        assert.ok(bottom < getMenuItemAngle(0));
     });
 
     it('consecutive items are exactly MENU_ANGLE_STEP apart', () => {

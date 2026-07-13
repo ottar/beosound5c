@@ -21,7 +21,11 @@ class MenuManager {
         const c = window.Constants || {};
         this.radius = c.arc?.radius || 1000;
         this.angleStep = c.arc?.menuAngleStep || 5;
+        // Arc geometry: y = cy + r·sin(angle), so LARGER angle = HIGHER on
+        // screen. The menu band is (topOverlayStart, bottomOverlayStart);
+        // the screen-top of the menu is the bottomOverlayStart side.
         this.topOverlayStart = c.overlays?.topOverlayStart ?? 160;
+        this.bottomOverlayStart = c.overlays?.bottomOverlayStart ?? 200;
 
         // Home/Music submenu-mode state (set up in fetchMenu when the MA
         // preset exposes a submenu; null-safe when the mode is off).
@@ -179,14 +183,15 @@ class MenuManager {
                     newItems.push(existing || { title: item.title, path });
                 }
             }
-            // Submenu mode: pin the toggle to the very top (array end) with
-            // PLAYING directly under it — classic BeoSound 5 order (the top
-            // MODE slot became Home/Music). Array order is bottom→top.
+            // Submenu mode: pin the toggle to the very top with PLAYING
+            // directly under it — classic BeoSound 5 (the top MODE slot
+            // became Home/Music). Index 0 renders at the screen top, so the
+            // toggle goes first, PLAYING second.
             if (this._pendingToggle) {
                 const pi = newItems.findIndex(m => m.path === 'menu/playing');
                 const playing = pi >= 0 ? newItems.splice(pi, 1)[0]
                                         : { title: 'PLAYING', path: 'menu/playing' };
-                newItems.push(playing, this._pendingToggle);
+                newItems.unshift(this._pendingToggle, playing);
                 this._pendingToggle = null;
             }
             this.menuItems = newItems;
@@ -374,13 +379,15 @@ class MenuManager {
     // ── Rendering ──
 
     getStartItemAngle() {
-        // Top-anchored: the first (top-most) item sits just below the top
-        // overlay boundary and items grow DOWNWARD, so the top slot — the
-        // Home/Music toggle — is pinned at the very top of the arc
-        // regardless of item count (classic BeoSound 5, where MODE was
-        // always the top slot). Must match laser-position-mapper's
-        // getMenuStartAngle so hit-testing lines up with rendering.
-        return this.topOverlayStart + this.angleStep / 2;
+        // Top-anchored. Screen-top = LARGEST angle (y = cy + r·sin), which is
+        // index 0 (getMenuItemAngle uses len-1-index). Pin index 0 just below
+        // the playing overlay and let the list grow DOWNWARD, so the top slot
+        // — the Home/Music toggle — is always at the very top of the arc
+        // regardless of item count (classic BeoSound 5's MODE slot). This
+        // returns the base (bottom-most, index len-1) angle; must match
+        // laser-position-mapper's getMenuStartAngle so hit-test == render.
+        const topAngle = this.bottomOverlayStart - this.angleStep / 2;
+        return topAngle - (this.menuItems.length - 1) * this.angleStep;
     }
 
     _ensureHoverDelegation(menuContainer) {
@@ -406,17 +413,15 @@ class MenuManager {
      *  routes a GO press here to toggle instead of acting on the view. */
     get pointerOnToggle() { return this._pointerPath === MenuManager.TOGGLE_PATH; }
 
-    /** Build the music-menu item list (array order is bottom→top, so the
-     *  toggle ends up at the very top and PLAYING directly under it):
-     *  [ …categories reversed…, PLAYING, HOME-toggle ]. */
+    /** Build the music-menu item list. Index 0 renders at the screen top,
+     *  so top→bottom is [ HOME-toggle, PLAYING, …categories… ]. */
     _musicMenuItems() {
         const cats = (this._musicSubmenu?.items || [])
-            .map(c => ({ title: c.title, path: c.path, dynamic: true }))
-            .reverse();
+            .map(c => ({ title: c.title, path: c.path, dynamic: true }));
         return [
-            ...cats,
-            { title: 'PLAYING', path: 'menu/playing' },
             { title: 'HOME', path: MenuManager.TOGGLE_PATH, dynamic: true },
+            { title: 'PLAYING', path: 'menu/playing' },
+            ...cats,
         ];
     }
 
@@ -462,7 +467,8 @@ class MenuManager {
         const pi = this.menuItems.findIndex(m => m.path === 'menu/playing');
         const playing = pi >= 0 ? this.menuItems.splice(pi, 1)[0]
                                 : { title: 'PLAYING', path: 'menu/playing' };
-        this.menuItems.push(playing, { title: 'MUSIC', path: MenuManager.TOGGLE_PATH, dynamic: true });
+        // Index 0 = screen top: toggle first, PLAYING under it.
+        this.menuItems.unshift({ title: 'MUSIC', path: MenuManager.TOGGLE_PATH, dynamic: true }, playing);
         window.LaserPositionMapper?.updateMenuItems?.(this.menuItems);
         this.renderMenuItems();
     }
