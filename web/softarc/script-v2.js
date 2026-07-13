@@ -19,6 +19,12 @@
  *     webSocketUrl: '...',
  *   })
  */
+
+// Neutral grey square shown while a row's artwork is pending (missing
+// image, or deferred by the fast-scroll velocity gate).
+const ARC_PLACEHOLDER_SRC =
+    "data:image/svg+xml,%3Csvg width='128' height='128' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='128' height='128' fill='%23333'/%3E%3C/svg%3E";
+
 class ArcList {
     constructor(config = {}) {
         // ===== CONFIGURATION =====
@@ -1409,6 +1415,7 @@ class ArcList {
         img.className = 'item-image';
         img.alt = item.name;
         img.loading = 'lazy';
+        img.decoding = 'async';
         img.dataset.itemId = item.id;
 
         img.onload = () => img.removeAttribute('data-loading');
@@ -1419,8 +1426,47 @@ class ArcList {
         };
 
         img.setAttribute('data-loading', 'true');
-        img.src = item.image || `data:image/svg+xml,%3Csvg width='128' height='128' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='128' height='128' fill='%23333'/%3E%3C/svg%3E`;
+        if (!item.image) {
+            img.src = ARC_PLACEHOLDER_SRC;
+        } else if (this._isFastScrolling()) {
+            // Velocity gate: during a fast wheel spin every animation frame
+            // brings new rows into the window — loading each row's artwork
+            // immediately meant a decode + GPU texture upload per row per
+            // frame, which exhausted the GPU process's transfer buffers on
+            // the Pi and killed the renderer. Defer: placeholder now, real
+            // src when the wheel settles (_scheduleImageSettle).
+            img.src = ARC_PLACEHOLDER_SRC;
+            img.dataset.src = item.image;
+            this._scheduleImageSettle();
+        } else {
+            img.src = item.image;
+        }
         return img;
+    }
+
+    /** True while the wheel is actively spinning: recent scroll input and
+     *  the eased index still far from its target. */
+    _isFastScrolling() {
+        return (Date.now() - this.lastScrollTime) < 250
+            && Math.abs(this.targetIndex - this.currentIndex) > 1.5;
+    }
+
+    /** (Re)arm the settle timer; when it fires with the wheel at rest, load
+     *  the deferred artwork of the rows still in the window. Rows that left
+     *  the window were removed from the DOM — their images never load. */
+    _scheduleImageSettle() {
+        if (this._imgSettleTimer) clearTimeout(this._imgSettleTimer);
+        this._imgSettleTimer = setTimeout(() => {
+            this._imgSettleTimer = null;
+            if (this._isFastScrolling()) {       // still spinning — wait more
+                this._scheduleImageSettle();
+                return;
+            }
+            this.container.querySelectorAll('img[data-src]').forEach(img => {
+                img.src = img.dataset.src;
+                delete img.dataset.src;
+            });
+        }, 250);
     }
 
     // ─── COUNTER + PATH ──────────────────────────────────────────────
@@ -1658,6 +1704,10 @@ class ArcList {
         if (this.snapTimer) {
             clearTimeout(this.snapTimer);
             this.snapTimer = null;
+        }
+        if (this._imgSettleTimer) {
+            clearTimeout(this._imgSettleTimer);
+            this._imgSettleTimer = null;
         }
         if (this._saveInterval) {
             clearInterval(this._saveInterval);
