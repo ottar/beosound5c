@@ -1,0 +1,56 @@
+/* BeoSound 5c — theme tokens (colors only, first pass).
+ *
+ * Single source of truth for every color used by the kiosk UI.
+ * Imported via @import from web/styles.css, web/softarc/styles.css and
+ * web/softarc/splash.css, so both the main document and the softarc
+ * iframes resolve the same palette.
+ *
+ * Conventions:
+ *  - `--x`     : a complete color value, usable directly.
+ *  - `--x-rgb` : a bare R, G, B triplet for alpha composition at the
+ *                use site: rgba(var(--x-rgb), 0.4). Alphas stay local
+ *                because they encode per-element emphasis, not palette.
+ *
+ * A future theme swaps the values here; use sites never change.
+ */
+
+:root {
+  /* ── Core surface & text ─────────────────────────────────────── */
+  --bg: #000;
+  --bg-rgb: 0, 0, 0;             /* scrims, overlay backdrops */
+  --fg: #fff;
+  --fg-rgb: 255, 255, 255;       /* dimmed text, hairlines, glows */
+
+  /* ── Accent (BeoSound blue) ──────────────────────────────────── */
+  --accent-rgb: 102, 153, 255;        /* section headers, actionable */
+  --accent-strong-rgb: 80, 140, 255;  /* GO-flash */
+  --accent-strong-soft-rgb: 120, 170, 255; /* GO-flash gradient end */
+  --focus: #3b82f6;                   /* keyboard focus outline */
+  --focus-rgb: 59, 130, 246;
+
+  /* ── States ──────────────────────────────────────────────────── */
+  --danger: #e53935;             /* camera LIVE indicator */
+  --danger-rgb: 229, 57, 53;
+
+  /* ── Brand ───────────────────────────────────────────────────── */
+  --spotify-rgb: 30, 215, 96;
+
+  /* ── Neutral greys, dark → light ─────────────────────────────── */
+  --grey-950: #0a0a0a;
+  --grey-900: #111;
+  --grey-870: #1a1a1a;
+  --grey-800: #222;
+  --grey-700: #333;
+  --grey-600: #444;
+  --grey-500: #666;
+  --grey-400: #888;
+  --grey-350: #999;
+  --grey-300: #aaa;
+  --grey-200: #ccc;
+  --grey-mid-rgb: 60, 60, 60;    /* vinyl grooves on the CD placeholder */
+
+  /* ── Tinted dark surfaces (album-stack cards) ────────────────── */
+  --surface-1: #1e1e22;
+  --surface-2: #2a2a2f;
+  --surface-3: #333338;
+}
