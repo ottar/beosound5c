@@ -29,8 +29,8 @@
         <svg id="volume-arc-svg" width="1024" height="768" style="overflow: visible;">
             <defs>
                 <linearGradient id="volArcGradient" x1="0" y1="1" x2="0" y2="0">
-                    <stop offset="0%" stop-color="rgba(102,153,255,0.2)"/>
-                    <stop offset="100%" stop-color="rgba(102,153,255,1)"/>
+                    <stop offset="0%" style="stop-color: rgba(var(--volume-arc-rgb), 0.2)"/>
+                    <stop offset="100%" style="stop-color: rgba(var(--volume-arc-rgb), 1)"/>
                 </linearGradient>
             </defs>
             <!-- Arc following wheel curvature: center (1024,384), radius 252, left semicircle -->
@@ -50,10 +50,10 @@
                 <svg width="1024" height="768" style="position: absolute; z-index: 90;">
                     <defs>
                         <linearGradient id="gradient" gradientTransform="rotate(90)">
-                            <stop offset="0%" stop-color="rgba(102,153,255,0)"/>
-                            <stop offset="5%" stop-color="rgba(102,153,255,1)"/>
-                            <stop offset="95%" stop-color="rgba(0,255,204,1)"/>
-                            <stop offset="100%" stop-color="rgba(0,255,204,0)"/>
+                            <stop offset="0%" style="stop-color: rgba(var(--menu-arc-start-rgb), 0)"/>
+                            <stop offset="5%" style="stop-color: rgba(var(--menu-arc-start-rgb), 1)"/>
+                            <stop offset="95%" style="stop-color: rgba(var(--menu-arc-end-rgb), 1)"/>
+                            <stop offset="100%" style="stop-color: rgba(var(--menu-arc-end-rgb), 0)"/>
                         </linearGradient>
                     </defs>
                     <path id="mainArc" fill="none" stroke="url(#gradient)" 
@@ -64,13 +64,13 @@
                 <svg id="anglePointer" width="1024" height="768" style="position: absolute; z-index: 100;">
                     <defs>
                         <radialGradient id="lineGradient">
-                            <stop offset="0%" stop-color="rgba(102,153,255,0.45)" />
-                            <stop offset="90%" stop-color="rgba(0,0,0,0)" />
+                            <stop offset="0%" style="stop-color: rgba(var(--laser-beam-rgb), 0.45)" />
+                            <stop offset="90%" style="stop-color: rgba(var(--scrim-rgb), 0)" />
                         </radialGradient>
                         <radialGradient id="dotGradient">
-                            <stop offset="0%" stop-color="rgba(128,204,255,0.9)" />
-                            <stop offset="40%" stop-color="rgba(128,204,255,0.4)" />
-                            <stop offset="100%" stop-color="rgba(128,204,255,0)" />
+                            <stop offset="0%" style="stop-color: rgba(var(--laser-dot-rgb), 0.9)" />
+                            <stop offset="40%" style="stop-color: rgba(var(--laser-dot-rgb), 0.4)" />
+                            <stop offset="100%" style="stop-color: rgba(var(--laser-dot-rgb), 0)" />
                         </radialGradient>
                     </defs>
                     <ellipse id="pointerDot" rx="45" ry="25" 

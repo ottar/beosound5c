@@ -9,15 +9,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg);
+    background: var(--page-bg);
 }
 .splash-card {
     text-align: center;
-    color: var(--grey-350);
+    color: var(--text-soft);
     font-family: 'Helvetica Neue', sans-serif;
 }
 .splash-card h2 {
-    color: var(--fg);
+    color: var(--text-primary);
     font-size: 22px;
     font-weight: 300;
     letter-spacing: 2px;
@@ -30,7 +30,7 @@
 }
 .setup-qr {
     margin: 0 auto 16px;
-    background: var(--fg);
+    background: var(--qr-card-bg);
     padding: 12px;
     border-radius: 8px;
     display: inline-block;
@@ -38,14 +38,14 @@
 .setup-url {
     font-family: 'SF Mono', Monaco, Consolas, monospace;
     font-size: 13px;
-    color: var(--grey-500);
+    color: var(--text-muted);
     word-break: break-all;
 }
 .loading-spinner {
     width: 48px;
     height: 48px;
-    border: 3px solid var(--grey-700);
-    border-top-color: var(--splash-accent, var(--fg));
+    border: 3px solid var(--spinner-track);
+    border-top-color: var(--splash-accent, var(--text-primary));
     border-radius: 50%;
     margin: 0 auto 24px;
     animation: spin 1s linear infinite;

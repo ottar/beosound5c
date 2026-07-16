@@ -1,56 +1,78 @@
-/* BeoSound 5c — theme tokens (colors only, first pass).
+/* BeoSound 5c — theme tokens.
  *
  * Single source of truth for every color used by the kiosk UI.
  * Imported via @import from web/styles.css, web/softarc/styles.css and
- * web/softarc/splash.css, so both the main document and the softarc
- * iframes resolve the same palette.
+ * web/softarc/splash.css; the SVG gradients in index.html (menu arc,
+ * laser pointer) reference the tokens through inline style attributes.
+ *
+ * Naming is functional, not color-based: tokens say what they are FOR
+ * (--text-muted, --glow-rgb, --lamp-on-rgb), never what they look like.
+ * Several tokens share a value today (e.g. all the white-based ones) —
+ * that is deliberate: they are distinct roles a theme may separate.
  *
  * Conventions:
  *  - `--x`     : a complete color value, usable directly.
  *  - `--x-rgb` : a bare R, G, B triplet for alpha composition at the
  *                use site: rgba(var(--x-rgb), 0.4). Alphas stay local
  *                because they encode per-element emphasis, not palette.
- *
- * A future theme swaps the values here; use sites never change.
  */
 
 :root {
-  /* ── Core surface & text ─────────────────────────────────────── */
-  --bg: #000;
-  --bg-rgb: 0, 0, 0;             /* scrims, overlay backdrops */
-  --fg: #fff;
-  --fg-rgb: 255, 255, 255;       /* dimmed text, hairlines, glows */
+  /* ── Page ────────────────────────────────────────────────────── */
+  --page-bg: #000;
+  --scrim-rgb: 0, 0, 0;          /* overlay backdrops, edge fades */
+  --shadow-rgb: 0, 0, 0;         /* box-shadows */
 
-  /* ── Accent (BeoSound blue) ──────────────────────────────────── */
-  --accent-rgb: 102, 153, 255;        /* section headers, actionable */
-  --accent-strong-rgb: 80, 140, 255;  /* GO-flash */
-  --accent-strong-soft-rgb: 120, 170, 255; /* GO-flash gradient end */
-  --focus: #3b82f6;                   /* keyboard focus outline */
-  --focus-rgb: 59, 130, 246;
+  /* ── Text, bright → faint ────────────────────────────────────── */
+  --text-primary: #fff;
+  --text-primary-rgb: 255, 255, 255;  /* dimmed variants via alpha */
+  --text-secondary: #ccc;        /* CD-back tracklist body */
+  --text-tertiary: #aaa;         /* de-emphasised emphasis (playing №) */
+  --text-soft: #999;             /* splash prose, placeholder icons */
+  --text-dim: #888;              /* loading text, list headers */
+  --text-muted: #666;            /* empty states, durations, URLs */
+  --text-hint: #444;             /* faintest hints (camera nav) */
 
-  /* ── States ──────────────────────────────────────────────────── */
-  --danger: #e53935;             /* camera LIVE indicator */
-  --danger-rgb: 229, 57, 53;
+  /* ── Light-on-dark structure ─────────────────────────────────── */
+  --hairline-rgb: 255, 255, 255; /* thin borders, dividers */
+  --glow-rgb: 255, 255, 255;     /* box-shadow glows/halos */
+  --fill-rgb: 255, 255, 255;     /* volume-bar fills, subtle washes */
+  --fill-bright: #fff;           /* solid indicator fill (speaker dot) */
+  --overlay-divider: #999;       /* overlay left-edge rule */
 
-  /* ── Brand ───────────────────────────────────────────────────── */
-  --spotify-rgb: 30, 215, 96;
+  /* ── Accent & interaction ────────────────────────────────────── */
+  --accent-rgb: 102, 153, 255;        /* headers, laser hover, actionable */
+  --go-flash-rgb: 80, 140, 255;       /* GO-press flash */
+  --go-flash-soft-rgb: 120, 170, 255; /* GO-flash gradient end */
+  --focus-ring: #3b82f6;              /* keyboard focus outline */
+  --focus-ring-rgb: 59, 130, 246;
 
-  /* ── Neutral greys, dark → light ─────────────────────────────── */
-  --grey-950: #0a0a0a;
-  --grey-900: #111;
-  --grey-870: #1a1a1a;
-  --grey-800: #222;
-  --grey-700: #333;
-  --grey-600: #444;
-  --grey-500: #666;
-  --grey-400: #888;
-  --grey-350: #999;
-  --grey-300: #aaa;
-  --grey-200: #ccc;
-  --grey-mid-rgb: 60, 60, 60;    /* vinyl grooves on the CD placeholder */
+  /* ── Status ──────────────────────────────────────────────────── */
+  --live-badge: #e53935;         /* camera LIVE dot + text */
+  --live-badge-rgb: 229, 57, 53;
+  --brand-spotify-rgb: 30, 215, 96;
 
-  /* ── Tinted dark surfaces (album-stack cards) ────────────────── */
-  --surface-1: #1e1e22;
-  --surface-2: #2a2a2f;
-  --surface-3: #333338;
+  /* ── Surfaces, sunken → raised ───────────────────────────────── */
+  --surface-dim: #111;           /* tracklist bg, icon tiles, disc label */
+  --surface: #1a1a1a;            /* keys, placeholder artwork */
+  --surface-bright: #222;        /* placeholder art, disc sheen */
+  --camera-feed-bg: #0a0a0a;     /* letterbox behind the camera feed */
+  --qr-card-bg: #fff;            /* setup QR card — must scan reliably */
+  --spinner-track: #333;         /* loading-spinner ring */
+
+  /* ── Album-stack cards (drill-down affordance) ───────────────── */
+  --stack-card: #1e1e22;
+  --stack-card-selected-back: #2a2a2f;
+  --stack-card-selected-front: #333338;
+
+  /* ── CD placeholder disc ─────────────────────────────────────── */
+  --disc-spindle: #444;
+  --disc-groove-rgb: 60, 60, 60;
+
+  /* ── Menu arc, volume arc & laser pointer (SVG in index.html) ── */
+  --menu-arc-start-rgb: var(--accent-rgb);
+  --menu-arc-end-rgb: 0, 255, 204;
+  --volume-arc-rgb: var(--accent-rgb);
+  --laser-beam-rgb: var(--accent-rgb);
+  --laser-dot-rgb: 128, 204, 255;
 }
